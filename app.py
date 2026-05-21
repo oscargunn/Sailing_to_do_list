@@ -390,20 +390,18 @@ def badge(text: str, style: dict) -> str:
 
 def render_active_card(job: dict, lk: str):
     with st.container(border=True):
-        tc, bc = st.columns([5, 1])
+        tc, ec, dc = st.columns([5, 1, 1])
         with tc:
             st.markdown(f"**{job['title']}**")
-        with bc:
-            ec, dc = st.columns(2)
-            with ec:
-                if st.button("Edit", key=f"e_{lk}_{job['id']}", help="Edit", use_container_width=True):
-                    st.session_state.dlg_job_id = job["id"]
-                    st.session_state.dlg_open   = True
-                    st.rerun()
-            with dc:
-                if st.button("Del", key=f"d_{lk}_{job['id']}", help="Delete", use_container_width=True):
-                    remove_job(job["id"])
-                    st.rerun()
+        with ec:
+            if st.button("Edit", key=f"e_{lk}_{job['id']}", help="Edit", use_container_width=True):
+                st.session_state.dlg_job_id = job["id"]
+                st.session_state.dlg_open   = True
+                st.rerun()
+        with dc:
+            if st.button("Del", key=f"d_{lk}_{job['id']}", help="Delete", use_container_width=True):
+                remove_job(job["id"])
+                st.rerun()
 
         if job.get("description"):
             st.caption(job["description"])
@@ -520,8 +518,9 @@ auto_archive()
 # ── CSS ───────────────────────────────────────────────────────────────────────
 
 st.markdown("""
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
 /* Base */
 html, body, [class*="css"] {
     font-family: 'DM Sans', sans-serif !important;
