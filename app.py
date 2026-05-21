@@ -12,16 +12,16 @@ st.set_page_config(page_title="Jobs Manager", page_icon=None, layout="wide")
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 PRIORITY_STYLES = {
-    "Low":    {"bg": "#f1f5f9", "color": "#64748b", "dot": "#94a3b8"},
-    "Medium": {"bg": "#eff6ff", "color": "#2563eb", "dot": "#3b82f6"},
-    "High":   {"bg": "#fff7ed", "color": "#c2410c", "dot": "#f97316"},
+    "Low":    {"bg": "#eff6ff", "color": "#2563eb", "dot": "#3b82f6"},
+    "Medium": {"bg": "#fff7ed", "color": "#c2410c", "dot": "#f97316"},
+    "High":   {"bg": "#fdf4ff", "color": "#7e22ce", "dot": "#a855f7"},
     "Urgent": {"bg": "#fef2f2", "color": "#b91c1c", "dot": "#ef4444"},
 }
 STATUS_STYLES = {
-    "Pending":     {"bg": "#fafafa",  "color": "#71717a", "dot": "#a1a1aa"},
-    "In Progress": {"bg": "#eff6ff",  "color": "#1d4ed8", "dot": "#3b82f6"},
-    "Completed":   {"bg": "#f0fdf4",  "color": "#15803d", "dot": "#22c55e"},
-    "Archived":    {"bg": "#f8fafc",  "color": "#94a3b8", "dot": "#cbd5e1"},
+    "Pending":     {"bg": "#fdf2f8", "color": "#9d174d", "dot": "#ec4899"},
+    "In Progress": {"bg": "#fff7ed", "color": "#c2410c", "dot": "#f97316"},
+    "Completed":   {"bg": "#f0fdf4", "color": "#15803d", "dot": "#22c55e"},
+    "Archived":    {"bg": "#f8fafc", "color": "#94a3b8", "dot": "#cbd5e1"},
 }
 
 DEFAULT_TABS = ["Europe", "NZ General", "LA Boat", "R1047", "Rigs", "New Boat"]
@@ -392,19 +392,16 @@ def render_active_card(job: dict, lk: str):
     with st.container(border=True):
         tc, ec, dc = st.columns([5, 1, 1])
         with tc:
-            st.markdown(f"**{job['title']}**")
+            st.markdown(f"<p style='margin:0;font-size:13px;font-weight:600;line-height:1.3;color:#0f172a;'>{job['title']}</p>", unsafe_allow_html=True)
         with ec:
-            if st.button("Edit", key=f"e_{lk}_{job['id']}", help="Edit", use_container_width=True):
+            if st.button("✏", key=f"e_{lk}_{job['id']}", help="Edit", use_container_width=True):
                 st.session_state.dlg_job_id = job["id"]
                 st.session_state.dlg_open   = True
                 st.rerun()
         with dc:
-            if st.button("Del", key=f"d_{lk}_{job['id']}", help="Delete", use_container_width=True):
+            if st.button("🗑", key=f"d_{lk}_{job['id']}", help="Delete", use_container_width=True):
                 remove_job(job["id"])
                 st.rerun()
-
-        if job.get("description"):
-            st.caption(job["description"])
 
         st.markdown(
             badge(job["priority"], PRIORITY_STYLES[job["priority"]]) + " " +
@@ -418,17 +415,20 @@ def render_active_card(job: dict, lk: str):
         if job.get("assignedName"):
             meta.append(f"Assigned to {job['assignedName']}")
         if meta:
-            st.caption("  ·  ".join(meta))
+            st.markdown(f"<p style='margin:2px 0 0;font-size:11px;color:#94a3b8;'>{'  ·  '.join(meta)}</p>", unsafe_allow_html=True)
 
         if job["status"] == "Completed" and job.get("completedAt"):
             ms_left = job["completedAt"] + 48 * 3_600_000 - now_ms()
             if ms_left > 0:
                 h = int(ms_left / 3_600_000)
                 m = int((ms_left % 3_600_000) / 60_000)
-                st.caption(f"Archives in {h}h {m}m")
+                st.markdown(f"<p style='margin:2px 0 0;font-size:11px;color:#94a3b8;'>Archives in {h}h {m}m</p>", unsafe_allow_html=True)
 
         if job.get("notes"):
-            st.caption(f"Note: {job['notes']}")
+            st.markdown(f"<p style='margin:4px 0 0;font-size:12px;color:#374151;'>{job['notes']}</p>", unsafe_allow_html=True)
+
+        if job.get("description"):
+            st.markdown(f"<p style='margin:2px 0 0;font-size:12px;color:#374151;'>{job['description']}</p>", unsafe_allow_html=True)
 
         if job["status"] != "Completed":
             opts = ["Pending", "In Progress", "Completed"]
@@ -582,9 +582,12 @@ hr { border-color: #e2e8f0 !important; margin: 0.75rem 0 !important; }
 
 /* Cards */
 div[data-testid="stVerticalBlockBorderWrapper"] {
-    border-radius: 6px !important;
+    border-radius: 2px !important;
     border-color: #e2e8f0 !important;
-    padding: 2px !important;
+    padding: 0px !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"] > div {
+    padding: 6px 10px !important;
 }
 
 /* Buttons */
@@ -592,8 +595,11 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
     font-family: 'DM Sans', sans-serif !important;
     font-size: 12px !important;
     font-weight: 500 !important;
-    border-radius: 5px !important;
+    border-radius: 3px !important;
     letter-spacing: 0.01em !important;
+    padding: 2px 6px !important;
+    height: 28px !important;
+    min-height: 28px !important;
 }
 .stButton button[kind="primary"] {
     background: #0f172a !important;
@@ -604,8 +610,13 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
     background: #1e293b !important;
 }
 .stButton button[kind="secondary"] {
-    background: white !important;
+    background: #f8fafc !important;
     border: 1px solid #e2e8f0 !important;
+    color: #64748b !important;
+    filter: grayscale(100%) !important;
+}
+.stButton button[kind="secondary"]:hover {
+    background: #f1f5f9 !important;
     color: #374151 !important;
 }
 
