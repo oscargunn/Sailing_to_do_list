@@ -525,7 +525,7 @@ auto_archive()
 
 st.markdown("""
 <style>
-.block-container { padding-top: 1rem !important; }
+.block-container { padding-top: 4rem !important; }
 div[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 12px !important; }
 </style>
 """, unsafe_allow_html=True)
