@@ -4,6 +4,8 @@ import os
 import random
 import string
 from datetime import datetime, date
+import smtplib
+from email.mime.text import MIMEText
 
 st.set_page_config(page_title="Jobs Manager", page_icon="🔧", layout="wide")
 
@@ -262,7 +264,23 @@ def upsert_job(data: dict, job_id: str | None = None):
     else:
         st.session_state.jobs.append({**data, "id": gen_id(), "createdAt": now_ms(), "completedAt": None})
     save_data()
+# Email initialiser 
 
+def send_email(to_addr: str, subject: str, body: str):
+    try:
+        cfg = st.secrets["email"]
+        msg = MIMEText(body)
+        msg["Subject"] = subject
+        msg["From"] = cfg["sender"]
+        msg["To"] = to_addr
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+            s.login(cfg["sender"], cfg["password"])
+            s.send_message(msg)
+        return True
+    except Exception as e:
+        st.error(f"Email failed: {e}")
+        return False
+        
 # ── Dialogs ───────────────────────────────────────────────────────────────────
 
 @st.dialog("Job Details", width="large")
@@ -334,14 +352,12 @@ def job_dialog():
         st.rerun()
 
 
-@st.dialog("Email Notification Preview", width="large")
+@st.dialog("Send Email Notification", width="large")
 def email_dialog():
     job_id = st.session_state.get("email_job_id")
     job    = next((j for j in st.session_state.jobs if j["id"] == job_id), None)
     if job:
         body = (
-            f"To: {job.get('assignedEmail') or '—'}\n"
-            f"Subject: [Job Assigned] {job['title']}\n\n"
             f"Hi {job.get('assignedName') or 'there'},\n\n"
             f"You have been assigned a new job on the {job['location']} project.\n\n"
             f"Job:      {job['title']}\n"
@@ -350,12 +366,16 @@ def email_dialog():
             + "\nPlease log in to view full details.\n\nRegards,\nJobs Management System"
         )
         st.code(body, language=None)
-        st.caption("In production this would send via SendGrid / SMTP.")
-
-    if st.button("Close", use_container_width=True):
-        st.session_state.email_open   = False
-        st.session_state.email_job_id = None
-        st.rerun()
+        sc, cc = st.columns(2)
+        with sc:
+            if st.button("📧 Send", type="primary", use_container_width=True):
+                if send_email(job["assignedEmail"], f"[Job Assigned] {job['title']}", body):
+                    st.success("Email sent!")
+        with cc:
+            if st.button("Cancel", use_container_width=True):
+                st.session_state.email_open   = False
+                st.session_state.email_job_id = None
+                st.rerun()
 
 # ── Card helpers ──────────────────────────────────────────────────────────────
 
