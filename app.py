@@ -3,25 +3,25 @@ import json
 import os
 import random
 import string
-from datetime import datetime, date
 import smtplib
 from email.mime.text import MIMEText
+from datetime import datetime, date
 
-st.set_page_config(page_title="Jobs Manager", page_icon="🔧", layout="wide")
+st.set_page_config(page_title="Jobs Manager", page_icon=None, layout="wide")
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 PRIORITY_STYLES = {
-    "Low":    {"bg": "#f3f4f6", "color": "#4b5563"},
-    "Medium": {"bg": "#dbeafe", "color": "#1d4ed8"},
-    "High":   {"bg": "#ffedd5", "color": "#c2410c"},
-    "Urgent": {"bg": "#fee2e2", "color": "#b91c1c"},
+    "Low":    {"bg": "#f1f5f9", "color": "#64748b", "dot": "#94a3b8"},
+    "Medium": {"bg": "#eff6ff", "color": "#2563eb", "dot": "#3b82f6"},
+    "High":   {"bg": "#fff7ed", "color": "#c2410c", "dot": "#f97316"},
+    "Urgent": {"bg": "#fef2f2", "color": "#b91c1c", "dot": "#ef4444"},
 }
 STATUS_STYLES = {
-    "Pending":     {"bg": "#fef9c3", "color": "#92400e"},
-    "In Progress": {"bg": "#dbeafe", "color": "#1d4ed8"},
-    "Completed":   {"bg": "#dcfce7", "color": "#166534"},
-    "Archived":    {"bg": "#f3f4f6", "color": "#6b7280"},
+    "Pending":     {"bg": "#fafafa",  "color": "#71717a", "dot": "#a1a1aa"},
+    "In Progress": {"bg": "#eff6ff",  "color": "#1d4ed8", "dot": "#3b82f6"},
+    "Completed":   {"bg": "#f0fdf4",  "color": "#15803d", "dot": "#22c55e"},
+    "Archived":    {"bg": "#f8fafc",  "color": "#94a3b8", "dot": "#cbd5e1"},
 }
 
 DEFAULT_TABS = ["Europe", "NZ General", "LA Boat", "R1047", "Rigs", "New Boat"]
@@ -186,6 +186,38 @@ RAW_SEED = [
     ["Tiller extension pins","New Boat","Pending","Medium","",""],
 ]
 
+# ── Email ─────────────────────────────────────────────────────────────────────
+
+def send_email(to_addr: str, subject: str, body: str):
+    try:
+        cfg = st.secrets["email"]
+        msg = MIMEText(body)
+        msg["Subject"] = subject
+        msg["From"]    = cfg["sender"]
+        msg["To"]      = to_addr
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+            s.login(cfg["sender"], cfg["password"])
+            s.send_message(msg)
+        return True
+    except Exception as e:
+        st.toast(f"Email failed: {e}", icon=None)
+        return False
+
+def notify_assigned(job: dict):
+    if not job.get("assignedEmail"):
+        return
+    body = (
+        f"Hi {job.get('assignedName') or 'there'},\n\n"
+        f"You have been assigned a job on the {job['location']} project.\n\n"
+        f"Job:      {job['title']}\n"
+        f"Priority: {job['priority']}\n"
+        f"Status:   {job['status']}\n"
+        + (f"Notes:    {job['notes']}\n" if job.get("notes") else "")
+        + (f"Due:      {job['dueDate']}\n" if job.get("dueDate") else "")
+        + "\nPlease log in to view full details.\n\nRegards,\nJobs Management System"
+    )
+    send_email(job["assignedEmail"], f"[Job Assigned] {job['title']}", body)
+
 # ── Data layer ────────────────────────────────────────────────────────────────
 
 def now_ms() -> float:
@@ -225,7 +257,7 @@ def save_data():
 # ── Mutations ─────────────────────────────────────────────────────────────────
 
 def auto_archive():
-    ts = now_ms()
+    ts    = now_ms()
     dirty = False
     for j in st.session_state.jobs:
         if j["status"] == "Completed" and j.get("completedAt") and ts - j["completedAt"] >= 48 * 3_600_000:
@@ -250,38 +282,30 @@ def remove_job(job_id: str):
 def restore_job(job_id: str):
     for j in st.session_state.jobs:
         if j["id"] == job_id:
-            j["status"] = "Pending"
+            j["status"]      = "Pending"
             j["completedAt"] = None
             break
     save_data()
 
 def upsert_job(data: dict, job_id: str | None = None):
+    is_new = job_id is None
     if job_id:
         for i, j in enumerate(st.session_state.jobs):
             if j["id"] == job_id:
                 st.session_state.jobs[i] = {**j, **data}
+                saved = st.session_state.jobs[i]
                 break
     else:
-        st.session_state.jobs.append({**data, "id": gen_id(), "createdAt": now_ms(), "completedAt": None})
+        new_job = {**data, "id": gen_id(), "createdAt": now_ms(), "completedAt": None}
+        st.session_state.jobs.append(new_job)
+        saved = new_job
     save_data()
-# Email initialiser 
+    # Auto-send email on new job creation if email provided
+    if is_new and saved.get("assignedEmail"):
+        notify_assigned(saved)
+        st.toast(f"Notification sent to {saved['assignedEmail']}")
 
-def send_email(to_addr: str, subject: str, body: str):
-    try:
-        cfg = st.secrets["email"]
-        msg = MIMEText(body)
-        msg["Subject"] = subject
-        msg["From"] = cfg["sender"]
-        msg["To"] = to_addr
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
-            s.login(cfg["sender"], cfg["password"])
-            s.send_message(msg)
-        return True
-    except Exception as e:
-        st.error(f"Email failed: {e}")
-        return False
-        
-# ── Dialogs ───────────────────────────────────────────────────────────────────
+# ── Dialog ────────────────────────────────────────────────────────────────────
 
 @st.dialog("Job Details", width="large")
 def job_dialog():
@@ -320,12 +344,16 @@ def job_dialog():
     with c4:
         assigned_name = st.text_input("Assigned Name", value=job.get("assignedName", "") if job else "")
 
-    assigned_email = st.text_input("Assigned Email", value=job.get("assignedEmail", "") if job else "")
-    notes          = st.text_area("Notes", value=job.get("notes", "") if job else "", height=70)
+    assigned_email = st.text_input(
+        "Assigned Email",
+        value=job.get("assignedEmail", "") if job else "",
+        help="An email notification will be sent automatically when a new job is created with an email address.",
+    )
+    notes = st.text_area("Notes", value=job.get("notes", "") if job else "", height=70)
 
     sc, cc = st.columns(2)
     with sc:
-        save = st.button("💾 Save", type="primary", use_container_width=True)
+        save   = st.button("Save", type="primary", use_container_width=True)
     with cc:
         cancel = st.button("Cancel", use_container_width=True)
 
@@ -351,41 +379,14 @@ def job_dialog():
         st.session_state.dlg_job_id = None
         st.rerun()
 
-
-@st.dialog("Send Email Notification", width="large")
-def email_dialog():
-    job_id = st.session_state.get("email_job_id")
-    job    = next((j for j in st.session_state.jobs if j["id"] == job_id), None)
-    if job:
-        body = (
-            f"Hi {job.get('assignedName') or 'there'},\n\n"
-            f"You have been assigned a new job on the {job['location']} project.\n\n"
-            f"Job:      {job['title']}\n"
-            f"Priority: {job['priority']}\n"
-            + (f"Notes:    {job['notes']}\n" if job.get("notes") else "")
-            + "\nPlease log in to view full details.\n\nRegards,\nJobs Management System"
-        )
-        st.code(body, language=None)
-        sc, cc = st.columns(2)
-        with sc:
-            if st.button("📧 Send", type="primary", use_container_width=True):
-                if send_email(job["assignedEmail"], f"[Job Assigned] {job['title']}", body):
-                    st.success("Email sent!")
-        with cc:
-            if st.button("Cancel", use_container_width=True):
-                st.session_state.email_open   = False
-                st.session_state.email_job_id = None
-                st.rerun()
-
 # ── Card helpers ──────────────────────────────────────────────────────────────
 
 def badge(text: str, style: dict) -> str:
     return (
         f'<span style="background:{style["bg"]};color:{style["color"]};'
-        f'padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600;'
-        f'display:inline-block;margin:2px;">{text}</span>'
+        f'padding:2px 10px;border-radius:4px;font-size:11px;font-weight:600;'
+        f'letter-spacing:0.03em;display:inline-block;margin:2px;">{text.upper()}</span>'
     )
-
 
 def render_active_card(job: dict, lk: str):
     with st.container(border=True):
@@ -395,12 +396,12 @@ def render_active_card(job: dict, lk: str):
         with bc:
             ec, dc = st.columns(2)
             with ec:
-                if st.button("✏️", key=f"e_{lk}_{job['id']}", help="Edit"):
+                if st.button("Edit", key=f"e_{lk}_{job['id']}", help="Edit", use_container_width=True):
                     st.session_state.dlg_job_id = job["id"]
                     st.session_state.dlg_open   = True
                     st.rerun()
             with dc:
-                if st.button("🗑️", key=f"d_{lk}_{job['id']}", help="Delete"):
+                if st.button("Del", key=f"d_{lk}_{job['id']}", help="Delete", use_container_width=True):
                     remove_job(job["id"])
                     st.rerun()
 
@@ -413,29 +414,23 @@ def render_active_card(job: dict, lk: str):
             unsafe_allow_html=True,
         )
 
+        meta = []
         if job.get("dueDate"):
-            st.caption(f"📅 {job['dueDate']}")
-
+            meta.append(f"Due {job['dueDate']}")
         if job.get("assignedName"):
-            ac, nc = st.columns([3, 1])
-            with ac:
-                st.caption(f"👤 {job['assignedName']}")
-            with nc:
-                if job.get("assignedEmail"):
-                    if st.button("📧", key=f"n_{lk}_{job['id']}", help="Email preview"):
-                        st.session_state.email_job_id = job["id"]
-                        st.session_state.email_open   = True
-                        st.rerun()
+            meta.append(f"Assigned to {job['assignedName']}")
+        if meta:
+            st.caption("  ·  ".join(meta))
 
         if job["status"] == "Completed" and job.get("completedAt"):
             ms_left = job["completedAt"] + 48 * 3_600_000 - now_ms()
             if ms_left > 0:
                 h = int(ms_left / 3_600_000)
                 m = int((ms_left % 3_600_000) / 60_000)
-                st.caption(f"🕐 Archives in {h}h {m}m")
+                st.caption(f"Archives in {h}h {m}m")
 
         if job.get("notes"):
-            st.caption(f"📝 {job['notes']}")
+            st.caption(f"Note: {job['notes']}")
 
         if job["status"] != "Completed":
             opts = ["Pending", "In Progress", "Completed"]
@@ -455,7 +450,7 @@ def render_archived_card(job: dict, lk: str):
         with tc:
             st.markdown(f"**{job['title']}**")
         with rc:
-            if st.button("↩", key=f"r_{lk}_{job['id']}", help="Restore to Pending", use_container_width=True):
+            if st.button("Restore", key=f"r_{lk}_{job['id']}", help="Restore to Pending", use_container_width=True):
                 restore_job(job["id"])
                 st.rerun()
         st.markdown(
@@ -463,10 +458,13 @@ def render_archived_card(job: dict, lk: str):
             badge("Archived", STATUS_STYLES["Archived"]),
             unsafe_allow_html=True,
         )
+        meta = []
         if job.get("assignedName"):
-            st.caption(f"👤 {job['assignedName']}")
+            meta.append(f"Assigned to {job['assignedName']}")
         if job.get("notes"):
-            st.caption(f"📝 {job['notes']}")
+            meta.append(f"Note: {job['notes']}")
+        if meta:
+            st.caption("  ·  ".join(meta))
 
 
 def render_kanban(location: str, view: str, search: str, filter_priority: str, filter_status: str):
@@ -488,16 +486,16 @@ def render_kanban(location: str, view: str, search: str, filter_priority: str, f
         for i, col_name in enumerate(["Pending", "In Progress", "Completed"]):
             group = [j for j in pool if j["status"] == col_name]
             with cols[i]:
-                st.markdown(f"#### {col_name}  `{len(group)}`")
+                st.markdown(f"#### {col_name} &nbsp; `{len(group)}`")
                 if not group:
-                    st.caption("_No jobs_")
+                    st.caption("No jobs")
                 for job in group:
                     render_active_card(job, lk)
     else:
         pool = [j for j in tab_jobs if j["status"] == "Archived" and matches(j)]
-        st.markdown(f"#### Archived  `{len(pool)}`")
+        st.markdown(f"#### Archived &nbsp; `{len(pool)}`")
         if not pool:
-            st.caption("_No archived jobs_")
+            st.caption("No archived jobs")
         else:
             cols = st.columns(3)
             for idx, job in enumerate(pool):
@@ -514,8 +512,6 @@ if "initialized" not in st.session_state:
         "dlg_open":     False,
         "dlg_job_id":   None,
         "dlg_location": tabs[0] if tabs else DEFAULT_TABS[0],
-        "email_open":   False,
-        "email_job_id": None,
         "initialized":  True,
     })
 
@@ -524,26 +520,168 @@ auto_archive()
 # ── CSS ───────────────────────────────────────────────────────────────────────
 
 st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-.block-container { padding-top: 4rem !important; }
-div[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 12px !important; }
+/* Base */
+html, body, [class*="css"] {
+    font-family: 'DM Sans', sans-serif !important;
+}
+.block-container {
+    padding-top: 5rem !important;
+    max-width: 1400px !important;
+}
+
+/* Hide Streamlit branding */
+#MainMenu, footer, header { visibility: hidden; }
+
+/* Custom header bar */
+.app-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 0;
+}
+.app-title {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 20px;
+    font-weight: 600;
+    color: #0f172a;
+    letter-spacing: -0.02em;
+    margin: 0;
+}
+.app-subtitle {
+    font-size: 13px;
+    color: #94a3b8;
+    font-weight: 400;
+}
+
+/* Dividers */
+hr { border-color: #e2e8f0 !important; margin: 0.75rem 0 !important; }
+
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0;
+    border-bottom: 1px solid #e2e8f0;
+    background: transparent;
+}
+.stTabs [data-baseweb="tab"] {
+    font-family: 'DM Sans', sans-serif !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    color: #64748b !important;
+    padding: 10px 18px !important;
+    border-radius: 0 !important;
+    border-bottom: 2px solid transparent !important;
+}
+.stTabs [aria-selected="true"] {
+    color: #0f172a !important;
+    border-bottom: 2px solid #0f172a !important;
+    background: transparent !important;
+}
+.stTabs [data-baseweb="tab-highlight"] { display: none !important; }
+.stTabs [data-baseweb="tab-border"]    { display: none !important; }
+
+/* Cards */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    border-radius: 6px !important;
+    border-color: #e2e8f0 !important;
+    padding: 2px !important;
+}
+
+/* Buttons */
+.stButton button {
+    font-family: 'DM Sans', sans-serif !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    border-radius: 5px !important;
+    letter-spacing: 0.01em !important;
+}
+.stButton button[kind="primary"] {
+    background: #0f172a !important;
+    border: none !important;
+    color: white !important;
+}
+.stButton button[kind="primary"]:hover {
+    background: #1e293b !important;
+}
+.stButton button[kind="secondary"] {
+    background: white !important;
+    border: 1px solid #e2e8f0 !important;
+    color: #374151 !important;
+}
+
+/* Inputs */
+.stTextInput input, .stTextArea textarea, .stSelectbox select {
+    font-family: 'DM Sans', sans-serif !important;
+    font-size: 13px !important;
+    border-radius: 5px !important;
+    border-color: #e2e8f0 !important;
+}
+.stSelectbox [data-baseweb="select"] {
+    border-radius: 5px !important;
+}
+
+/* Column headers */
+h4 {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: #475569 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.06em !important;
+}
+
+/* Caption text */
+.stCaptionContainer, [data-testid="stCaptionContainer"] {
+    color: #94a3b8 !important;
+    font-size: 12px !important;
+}
+
+/* Toast */
+[data-testid="stToast"] {
+    font-family: 'DM Sans', sans-serif !important;
+    font-size: 13px !important;
+}
+
+/* Radio */
+.stRadio label {
+    font-family: 'DM Sans', sans-serif !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+}
+
+/* Mono for code/badges */
+code {
+    font-family: 'DM Mono', monospace !important;
+    font-size: 11px !important;
+    background: #f1f5f9 !important;
+    color: #475569 !important;
+    border-radius: 4px !important;
+    padding: 1px 6px !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
 # ── Header ────────────────────────────────────────────────────────────────────
 
-hc1, hc2, hc3, hc4 = st.columns([2.5, 3, 1.5, 1.5])
+hc1, hc2, hc3, hc4 = st.columns([2, 3.5, 1.5, 1.5])
 with hc1:
-    st.markdown("## 🔧 Jobs Manager")
+    st.markdown("""
+    <div class="app-header">
+        <div>
+            <div class="app-title">Jobs Manager</div>
+            <div class="app-subtitle">NZL 49er Programme</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 with hc2:
-    search = st.text_input("Search", placeholder="Search jobs or assignees…", label_visibility="collapsed")
+    search = st.text_input("Search", placeholder="Search jobs or assignees", label_visibility="collapsed")
 with hc3:
     filter_priority = st.selectbox(
-        "Priority filter", ["All", "Low", "Medium", "High", "Urgent"], label_visibility="collapsed"
+        "Priority", ["All", "Low", "Medium", "High", "Urgent"], label_visibility="collapsed"
     )
 with hc4:
     filter_status = st.selectbox(
-        "Status filter", ["All", "Pending", "In Progress", "Completed"], label_visibility="collapsed"
+        "Status", ["All", "Pending", "In Progress", "Completed"], label_visibility="collapsed"
     )
 
 st.markdown("---")
@@ -554,7 +692,7 @@ tab_labels = []
 for loc in st.session_state.tabs_list:
     n = sum(1 for j in st.session_state.jobs if j["location"] == loc and j["status"] != "Archived")
     tab_labels.append(f"{loc}  ({n})")
-tab_labels.append("＋  New Tab")
+tab_labels.append("+ New Tab")
 
 loc_tabs = st.tabs(tab_labels)
 
@@ -569,7 +707,7 @@ for i, tab_ctx in enumerate(loc_tabs[:-1]):
                 horizontal=True, key=f"view_{loc}", label_visibility="collapsed",
             )
         with ac:
-            if st.button("＋ Add Job", key=f"add_{loc}", type="primary", use_container_width=True):
+            if st.button("+ Add Job", key=f"add_{loc}", type="primary", use_container_width=True):
                 st.session_state.dlg_job_id   = None
                 st.session_state.dlg_location = loc
                 st.session_state.dlg_open     = True
@@ -592,10 +730,7 @@ with loc_tabs[-1]:
             save_data()
             st.rerun()
 
-# ── Open dialogs if flagged ───────────────────────────────────────────────────
+# ── Open dialog if flagged ────────────────────────────────────────────────────
 
 if st.session_state.get("dlg_open"):
     job_dialog()
-
-if st.session_state.get("email_open"):
-    email_dialog()
