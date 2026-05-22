@@ -191,21 +191,23 @@ RAW_SEED = [
 def send_email(to_addr: str, subject: str, body: str):
     try:
         cfg = st.secrets["email"]
+        # Support multiple comma-separated addresses
+        recipients = [a.strip() for a in to_addr.split(",") if a.strip()]
         msg = MIMEText(body)
         msg["Subject"] = subject
         msg["From"]    = cfg["sender"]
-        msg["To"]      = to_addr
+        msg["To"]      = ", ".join(recipients)
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
             s.login(cfg["sender"], cfg["password"])
-            s.send_message(msg)
+            s.sendmail(cfg["sender"], recipients, msg.as_string())
         return True
     except Exception as e:
-        st.toast(f"Email failed: {e}", icon=None)
+        st.session_state["email_toast_error"] = f"Email failed: {e}"
         return False
 
-def notify_assigned(job: dict):
+def notify_assigned(job: dict) -> bool:
     if not job.get("assignedEmail"):
-        return
+        return False
     body = (
         f"Hi {job.get('assignedName') or 'there'},\n\n"
         f"You have been assigned a job on the {job['location']} project.\n\n"
@@ -216,7 +218,7 @@ def notify_assigned(job: dict):
         + (f"Due:      {job['dueDate']}\n" if job.get("dueDate") else "")
         + "\nPlease log in to view full details.\n\nRegards,\nJobs Management System"
     )
-    send_email(job["assignedEmail"], f"[Job Assigned] {job['title']}", body)
+    return send_email(job["assignedEmail"], f"[Job Assigned] {job['title']}", body)
 
 # ── Data layer ────────────────────────────────────────────────────────────────
 
@@ -306,8 +308,11 @@ def upsert_job(data: dict, job_id: str | None = None):
     save_data()
     # Auto-send email on new job creation if email provided
     if is_new and saved.get("assignedEmail"):
-        notify_assigned(saved)
-        st.toast(f"Notification sent to {saved['assignedEmail']}")
+        success = notify_assigned(saved)
+        if success:
+            st.session_state["email_toast"] = f"Notification sent to {saved['assignedEmail']}"
+        else:
+            st.session_state["email_toast_error"] = f"Email failed — check Streamlit secrets."
 
 # ── Dialog ────────────────────────────────────────────────────────────────────
 
@@ -334,9 +339,10 @@ def job_dialog():
         default_loc = st.session_state.get("dlg_location", st.session_state.tabs_list[0])
         loc_idx     = st.session_state.tabs_list.index(default_loc) if default_loc in st.session_state.tabs_list else 0
         location    = st.selectbox("Location", st.session_state.tabs_list, index=loc_idx)
-    else:
-        location = job["location"]
-        st.caption(f"Location: **{location}**")
+else:
+        all_tabs = st.session_state.tabs_list
+        cur_loc  = job["location"] if job["location"] in all_tabs else all_tabs[0]
+        location = st.selectbox("Location", all_tabs, index=all_tabs.index(cur_loc))
 
     c3, c4 = st.columns(2)
     with c3:
@@ -407,32 +413,29 @@ def render_active_card(job: dict, lk: str):
                 remove_job(job["id"])
                 st.rerun()
 
-        st.markdown(
-            badge(job["priority"], PRIORITY_STYLES[job["priority"]]) + " " +
-            badge(job["status"],   STATUS_STYLES[job["status"]]),
-            unsafe_allow_html=True,
-        )
-
+        # Build a single compact info block to minimise Streamlit element overhead
         meta = []
         if job.get("dueDate"):
             meta.append(f"Due {job['dueDate']}")
         if job.get("assignedName"):
             meta.append(f"Assigned to {job['assignedName']}")
-        if meta:
-            st.markdown(f"<p style='margin:2px 0 0;font-size:11px;color:#94a3b8;'>{'  ·  '.join(meta)}</p>", unsafe_allow_html=True)
-
         if job["status"] == "Completed" and job.get("completedAt"):
             ms_left = job["completedAt"] + 48 * 3_600_000 - now_ms()
             if ms_left > 0:
                 h = int(ms_left / 3_600_000)
                 m = int((ms_left % 3_600_000) / 60_000)
-                st.markdown(f"<p style='margin:2px 0 0;font-size:11px;color:#94a3b8;'>Archives in {h}h {m}m</p>", unsafe_allow_html=True)
+                meta.append(f"Archives in {h}h {m}m")
 
-        if job.get("notes"):
-            st.markdown(f"<p style='margin:4px 0 0;font-size:12px;color:#374151;'>{job['notes']}</p>", unsafe_allow_html=True)
+        meta_html = f"<p style='font-size:11px;color:#94a3b8;margin:1px 0 0;'>{'  ·  '.join(meta)}</p>" if meta else ""
+        notes_html = f"<p style='font-size:11px;color:#374151;margin:1px 0 0;'>{job['notes']}</p>" if job.get("notes") else ""
+        desc_html  = f"<p style='font-size:11px;color:#374151;margin:1px 0 0;'>{job['description']}</p>" if job.get("description") else ""
 
-        if job.get("description"):
-            st.markdown(f"<p style='margin:2px 0 0;font-size:12px;color:#374151;'>{job['description']}</p>", unsafe_allow_html=True)
+        st.markdown(
+            badge(job["priority"], PRIORITY_STYLES[job["priority"]]) + " " +
+            badge(job["status"],   STATUS_STYLES[job["status"]]) +
+            meta_html + notes_html + desc_html,
+            unsafe_allow_html=True,
+        )
 
         if job["status"] != "Completed":
             opts = ["Pending", "In Progress", "Completed"]
@@ -520,6 +523,12 @@ if "initialized" not in st.session_state:
 
 auto_archive()
 
+# ── Show deferred toasts ──────────────────────────────────────────────────────
+if "email_toast" in st.session_state:
+    st.toast(st.session_state.pop("email_toast"))
+if "email_toast_error" in st.session_state:
+    st.error(st.session_state.pop("email_toast_error"))
+
 # ── CSS ───────────────────────────────────────────────────────────────────────
 
 st.markdown("""
@@ -590,9 +599,25 @@ div[data-testid="stVerticalBlockBorderWrapper"] {
     border-radius: 2px !important;
     border-color: #e2e8f0 !important;
     padding: 0px !important;
+    margin-bottom: 4px !important;
 }
 div[data-testid="stVerticalBlockBorderWrapper"] > div {
-    padding: 6px 10px !important;
+    padding: 4px 8px !important;
+}
+/* Tighten all paragraph margins inside cards */
+div[data-testid="stVerticalBlockBorderWrapper"] p {
+    margin: 0 !important;
+    line-height: 1.3 !important;
+}
+/* Shrink selectbox height in cards */
+div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox > div {
+    min-height: 28px !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox [data-baseweb="select"] > div {
+    padding-top: 2px !important;
+    padding-bottom: 2px !important;
+    min-height: 28px !important;
+    font-size: 11px !important;
 }
 
 /* Buttons */
