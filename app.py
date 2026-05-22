@@ -7,6 +7,12 @@ import smtplib
 from email.mime.text import MIMEText
 from datetime import datetime, date
 
+try:
+    from supabase import create_client
+    _SUPABASE_PKG = True
+except ImportError:
+    _SUPABASE_PKG = False
+
 st.set_page_config(page_title="Jobs Manager", page_icon=None, layout="wide")
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -230,6 +236,18 @@ def notify_assigned(job: dict) -> bool:
     )
     return send_email(job["assignedEmail"], f"[Job Assigned] {job['title']}", body)
 
+# ── Supabase client ───────────────────────────────────────────────────────────
+
+@st.cache_resource
+def _get_supabase():
+    if not _SUPABASE_PKG:
+        return None
+    try:
+        cfg = st.secrets["supabase"]
+        return create_client(cfg["url"], cfg["key"])
+    except Exception:
+        return None
+
 # ── Data layer ────────────────────────────────────────────────────────────────
 
 def now_ms() -> float:
@@ -272,6 +290,19 @@ def make_seed() -> list:
     ]
 
 def load_data() -> tuple:
+    # 1 — try Supabase (cloud, survives reboots)
+    sb = _get_supabase()
+    if sb:
+        try:
+            result = sb.table("app_state").select("data").eq("id", 1).execute()
+            if result.data:
+                d = result.data[0]["data"]
+                if d.get("jobs"):          # non-empty cloud record wins
+                    return d.get("jobs", make_seed()), d.get("tabs", list(DEFAULT_TABS)), d.get("archived_tabs", [])
+        except Exception as e:
+            st.session_state["supabase_load_error"] = f"Supabase load failed: {e}"
+
+    # 2 — fall back to local JSON (local dev without Supabase credentials)
     if os.path.exists(STORAGE_FILE):
         try:
             with open(STORAGE_FILE) as f:
@@ -279,15 +310,30 @@ def load_data() -> tuple:
             return d.get("jobs", make_seed()), d.get("tabs", list(DEFAULT_TABS)), d.get("archived_tabs", [])
         except Exception:
             pass
+
+    # 3 — first run: return seed data
     return make_seed(), list(DEFAULT_TABS), []
 
 def save_data():
-    with open(STORAGE_FILE, "w") as f:
-        json.dump({
-            "jobs": st.session_state.jobs,
-            "tabs": st.session_state.tabs_list,
-            "archived_tabs": st.session_state.archived_tabs,
-        }, f, indent=2)
+    payload = {
+        "jobs":          st.session_state.jobs,
+        "tabs":          st.session_state.tabs_list,
+        "archived_tabs": st.session_state.archived_tabs,
+    }
+    # 1 — save to Supabase (primary, cloud-persistent)
+    sb = _get_supabase()
+    if sb:
+        try:
+            sb.table("app_state").upsert({"id": 1, "data": payload}).execute()
+        except Exception as e:
+            st.session_state["supabase_save_error"] = f"Supabase save failed: {e}"
+
+    # 2 — also write local JSON as backup / for local dev
+    try:
+        with open(STORAGE_FILE, "w") as f:
+            json.dump(payload, f, indent=2)
+    except Exception:
+        pass
 
 # ── Mutations ─────────────────────────────────────────────────────────────────
 
@@ -594,6 +640,10 @@ if "email_toast" in st.session_state:
     st.toast(st.session_state.pop("email_toast"))
 if "email_toast_error" in st.session_state:
     st.error(st.session_state.pop("email_toast_error"))
+if "supabase_load_error" in st.session_state:
+    st.warning(st.session_state.pop("supabase_load_error"))
+if "supabase_save_error" in st.session_state:
+    st.warning(st.session_state.pop("supabase_save_error"))
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 
