@@ -24,8 +24,10 @@ STATUS_STYLES = {
     "Archived":    {"bg": "#f8fafc", "color": "#94a3b8", "dot": "#cbd5e1"},
 }
 
-DEFAULT_TABS = ["Europe", "NZ General", "LA Boat", "R1047", "Rigs", "New Boat"]
-STORAGE_FILE = "jobs_data.json"
+DEFAULT_TABS    = ["Europe", "NZ General", "LA Boat", "R1047", "Rigs", "New Boat"]
+STORAGE_FILE    = "jobs_data.json"
+PRIORITY_LEVELS = ["Low", "Medium", "High", "Urgent"]
+PRIORITY_RANK   = {p: i for i, p in enumerate(PRIORITY_LEVELS)}
 
 KNOWN_EMAILS = [
     "0oscargunn0@gmail.com",
@@ -236,6 +238,25 @@ def now_ms() -> float:
 def gen_id() -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=10))
 
+def effective_priority(job: dict) -> str:
+    """Return priority escalated toward Urgent as the due date approaches."""
+    rank = PRIORITY_RANK.get(job.get("priority", "Medium"), 1)
+    due  = job.get("dueDate", "")
+    if due:
+        try:
+            days_left = (date.fromisoformat(due) - date.today()).days
+            if days_left < 0:       # overdue
+                rank = 3
+            elif days_left == 0:    # due today
+                rank = min(rank + 2, 3)
+            elif days_left <= 2:    # due in 1-2 days
+                rank = min(rank + 2, 3)
+            elif days_left <= 5:    # due in 3-5 days
+                rank = min(rank + 1, 3)
+        except ValueError:
+            pass
+    return PRIORITY_LEVELS[rank]
+
 def make_seed() -> list:
     ts = now_ms()
     return [
@@ -383,7 +404,7 @@ def job_dialog():
         label_visibility="collapsed",
     )
     # Combine known + custom into one comma-separated string
-    all_custom = [e.strip() for e in custom_email.split(",") if e.strip()]
+    all_custom     = [e.strip() for e in custom_email.split(",") if e.strip()]
     assigned_email = ", ".join(selected_known + all_custom)
     notes = st.text_area("Notes", value=job.get("notes", "") if job else "", height=70)
 
@@ -439,10 +460,20 @@ def render_active_card(job: dict, lk: str):
                 remove_job(job["id"])
                 st.rerun()
 
-        # Build a single compact info block to minimise Streamlit element overhead
         meta = []
         if job.get("dueDate"):
-            meta.append(f"Due {job['dueDate']}")
+            try:
+                days_left = (date.fromisoformat(job["dueDate"]) - date.today()).days
+                if days_left < 0:
+                    meta.append(f"Overdue by {-days_left}d")
+                elif days_left == 0:
+                    meta.append("Due today")
+                elif days_left == 1:
+                    meta.append("Due tomorrow")
+                else:
+                    meta.append(f"Due {job['dueDate']}")
+            except ValueError:
+                meta.append(f"Due {job['dueDate']}")
         if job.get("assignedName"):
             meta.append(f"Assigned to {job['assignedName']}")
         if job["status"] == "Completed" and job.get("completedAt"):
@@ -452,13 +483,14 @@ def render_active_card(job: dict, lk: str):
                 m = int((ms_left % 3_600_000) / 60_000)
                 meta.append(f"Archives in {h}h {m}m")
 
-        meta_html = f"<p style='font-size:11px;color:#94a3b8;margin:1px 0 0;'>{'  ·  '.join(meta)}</p>" if meta else ""
+        eff_p      = effective_priority(job)
+        meta_html  = f"<p style='font-size:11px;color:#94a3b8;margin:1px 0 0;'>{'  ·  '.join(meta)}</p>" if meta else ""
         notes_html = f"<p style='font-size:11px;color:#374151;margin:1px 0 0;'>{job['notes']}</p>" if job.get("notes") else ""
         desc_html  = f"<p style='font-size:11px;color:#374151;margin:1px 0 0;'>{job['description']}</p>" if job.get("description") else ""
 
         st.markdown(
-            badge(job["priority"], PRIORITY_STYLES[job["priority"]]) + " " +
-            badge(job["status"],   STATUS_STYLES[job["status"]]) +
+            badge(eff_p,         PRIORITY_STYLES[eff_p]) + " " +
+            badge(job["status"], STATUS_STYLES[job["status"]]) +
             meta_html + notes_html + desc_html,
             unsafe_allow_html=True,
         )
@@ -511,11 +543,18 @@ def render_kanban(location: str, view: str, search: str, filter_priority: str, f
 
     tab_jobs = [j for j in st.session_state.jobs if j["location"] == location]
 
+    def sort_key(j):
+        # Primary: effective priority descending (Urgent=3 first)
+        # Secondary: due date ascending (soonest first), no due date last
+        # Tertiary: creation time ascending
+        due = j.get("dueDate") or "9999-99-99"
+        return (-PRIORITY_RANK[effective_priority(j)], due, j.get("createdAt", 0))
+
     if view == "Active":
         pool = [j for j in tab_jobs if j["status"] != "Archived" and matches(j)]
         cols = st.columns(3)
         for i, col_name in enumerate(["Pending", "In Progress", "Completed"]):
-            group = [j for j in pool if j["status"] == col_name]
+            group = sorted([j for j in pool if j["status"] == col_name], key=sort_key)
             with cols[i]:
                 st.markdown(f"#### {col_name} &nbsp; `{len(group)}`")
                 if not group:
@@ -550,6 +589,7 @@ if "initialized" not in st.session_state:
 auto_archive()
 
 # ── Show deferred toasts ──────────────────────────────────────────────────────
+
 if "email_toast" in st.session_state:
     st.toast(st.session_state.pop("email_toast"))
 if "email_toast_error" in st.session_state:
@@ -561,169 +601,58 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
 
-/* Base */
-html, body, [class*="css"] {
-    font-family: 'DM Sans', sans-serif !important;
-}
-.block-container {
-    padding-top: 5rem !important;
-    max-width: 1400px !important;
-}
-
-/* Hide Streamlit branding */
+html, body, [class*="css"] { font-family: 'DM Sans', sans-serif !important; }
+.block-container { padding-top: 5rem !important; max-width: 1400px !important; }
 #MainMenu, footer, header { visibility: hidden; }
 
-/* Custom header bar */
-.app-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 0;
-}
-.app-title {
-    font-family: 'DM Sans', sans-serif;
-    font-size: 20px;
-    font-weight: 600;
-    color: #0f172a;
-    letter-spacing: -0.02em;
-    margin: 0;
-}
-.app-subtitle {
-    font-size: 13px;
-    color: #94a3b8;
-    font-weight: 400;
-}
+.app-header { display: flex; align-items: center; gap: 12px; margin-bottom: 0; }
+.app-title  { font-family: 'DM Sans', sans-serif; font-size: 20px; font-weight: 600; color: #0f172a; letter-spacing: -0.02em; margin: 0; }
+.app-subtitle { font-size: 13px; color: #94a3b8; font-weight: 400; }
 
-/* Dividers */
 hr { border-color: #e2e8f0 !important; margin: 0.75rem 0 !important; }
 
-/* Tabs */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 0;
-    border-bottom: 1px solid #e2e8f0;
-    background: transparent;
-}
+.stTabs [data-baseweb="tab-list"] { gap: 0; border-bottom: 1px solid #e2e8f0; background: transparent; }
 .stTabs [data-baseweb="tab"] {
-    font-family: 'DM Sans', sans-serif !important;
-    font-size: 13px !important;
-    font-weight: 500 !important;
-    color: #64748b !important;
-    padding: 10px 18px !important;
-    border-radius: 0 !important;
+    font-family: 'DM Sans', sans-serif !important; font-size: 13px !important; font-weight: 500 !important;
+    color: #64748b !important; padding: 10px 18px !important; border-radius: 0 !important;
     border-bottom: 2px solid transparent !important;
 }
-.stTabs [aria-selected="true"] {
-    color: #0f172a !important;
-    border-bottom: 2px solid #0f172a !important;
-    background: transparent !important;
-}
+.stTabs [aria-selected="true"] { color: #0f172a !important; border-bottom: 2px solid #0f172a !important; background: transparent !important; }
 .stTabs [data-baseweb="tab-highlight"] { display: none !important; }
 .stTabs [data-baseweb="tab-border"]    { display: none !important; }
 
-/* Cards */
 div[data-testid="stVerticalBlockBorderWrapper"] {
-    border-radius: 2px !important;
-    border-color: #e2e8f0 !important;
-    padding: 0px !important;
-    margin-bottom: 4px !important;
+    border-radius: 2px !important; border-color: #e2e8f0 !important;
+    padding: 0px !important; margin-bottom: 4px !important;
 }
-div[data-testid="stVerticalBlockBorderWrapper"] > div {
-    padding: 4px 8px !important;
-}
-/* Tighten all paragraph margins inside cards */
-div[data-testid="stVerticalBlockBorderWrapper"] p {
-    margin: 0 !important;
-    line-height: 1.3 !important;
-}
-/* Shrink selectbox height in cards */
-div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox > div {
-    min-height: 28px !important;
-}
+div[data-testid="stVerticalBlockBorderWrapper"] > div { padding: 4px 8px !important; }
+div[data-testid="stVerticalBlockBorderWrapper"] p { margin: 0 !important; line-height: 1.3 !important; }
+div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox > div { min-height: 28px !important; }
 div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox [data-baseweb="select"] > div {
-    padding-top: 2px !important;
-    padding-bottom: 2px !important;
-    min-height: 28px !important;
-    font-size: 11px !important;
+    padding-top: 2px !important; padding-bottom: 2px !important; min-height: 28px !important; font-size: 11px !important;
 }
 
-/* Buttons */
 .stButton button {
-    font-family: 'DM Sans', sans-serif !important;
-    font-size: 12px !important;
-    font-weight: 500 !important;
-    border-radius: 3px !important;
-    letter-spacing: 0.01em !important;
-    padding: 2px 6px !important;
-    height: 28px !important;
-    min-height: 28px !important;
+    font-family: 'DM Sans', sans-serif !important; font-size: 12px !important; font-weight: 500 !important;
+    border-radius: 3px !important; letter-spacing: 0.01em !important;
+    padding: 2px 6px !important; height: 28px !important; min-height: 28px !important;
 }
-.stButton button[kind="primary"] {
-    background: #0f172a !important;
-    border: none !important;
-    color: white !important;
-}
-.stButton button[kind="primary"]:hover {
-    background: #1e293b !important;
-}
-.stButton button[kind="secondary"] {
-    background: #f8fafc !important;
-    border: 1px solid #e2e8f0 !important;
-    color: #64748b !important;
-    filter: grayscale(100%) !important;
-}
-.stButton button[kind="secondary"]:hover {
-    background: #f1f5f9 !important;
-    color: #374151 !important;
-}
+.stButton button[kind="primary"]         { background: #0f172a !important; border: none !important; color: white !important; }
+.stButton button[kind="primary"]:hover   { background: #1e293b !important; }
+.stButton button[kind="secondary"]       { background: #f8fafc !important; border: 1px solid #e2e8f0 !important; color: #64748b !important; filter: grayscale(100%) !important; }
+.stButton button[kind="secondary"]:hover { background: #f1f5f9 !important; color: #374151 !important; }
 
-/* Inputs */
 .stTextInput input, .stTextArea textarea, .stSelectbox select {
-    font-family: 'DM Sans', sans-serif !important;
-    font-size: 13px !important;
-    border-radius: 5px !important;
-    border-color: #e2e8f0 !important;
+    font-family: 'DM Sans', sans-serif !important; font-size: 13px !important;
+    border-radius: 5px !important; border-color: #e2e8f0 !important;
 }
-.stSelectbox [data-baseweb="select"] {
-    border-radius: 5px !important;
-}
+.stSelectbox [data-baseweb="select"] { border-radius: 5px !important; }
 
-/* Column headers */
-h4 {
-    font-size: 13px !important;
-    font-weight: 600 !important;
-    color: #475569 !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.06em !important;
-}
-
-/* Caption text */
-.stCaptionContainer, [data-testid="stCaptionContainer"] {
-    color: #94a3b8 !important;
-    font-size: 12px !important;
-}
-
-/* Toast */
-[data-testid="stToast"] {
-    font-family: 'DM Sans', sans-serif !important;
-    font-size: 13px !important;
-}
-
-/* Radio */
-.stRadio label {
-    font-family: 'DM Sans', sans-serif !important;
-    font-size: 13px !important;
-    font-weight: 500 !important;
-}
-
-/* Mono for code/badges */
-code {
-    font-family: 'DM Mono', monospace !important;
-    font-size: 11px !important;
-    background: #f1f5f9 !important;
-    color: #475569 !important;
-    border-radius: 4px !important;
-    padding: 1px 6px !important;
-}
+h4 { font-size: 13px !important; font-weight: 600 !important; color: #475569 !important; text-transform: uppercase !important; letter-spacing: 0.06em !important; }
+.stCaptionContainer, [data-testid="stCaptionContainer"] { color: #94a3b8 !important; font-size: 12px !important; }
+[data-testid="stToast"] { font-family: 'DM Sans', sans-serif !important; font-size: 13px !important; }
+.stRadio label { font-family: 'DM Sans', sans-serif !important; font-size: 13px !important; font-weight: 500 !important; }
+code { font-family: 'DM Mono', monospace !important; font-size: 11px !important; background: #f1f5f9 !important; color: #475569 !important; border-radius: 4px !important; padding: 1px 6px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -792,16 +721,14 @@ for i, tab_ctx in enumerate(loc_tabs[:-2]):
         with dc:
             if st.button("Delete Tab", key=f"del_tab_{loc}", use_container_width=True):
                 st.session_state.tabs_list = [t for t in st.session_state.tabs_list if t != loc]
-                st.session_state.jobs = [j for j in st.session_state.jobs if j["location"] != loc]
+                st.session_state.jobs      = [j for j in st.session_state.jobs if j["location"] != loc]
                 save_data()
                 st.rerun()
 
-        # ── Tab Settings expander ──────────────────────────────────────────────
         with st.expander("Tab Settings"):
             tabs_list = st.session_state.tabs_list
-            idx = tabs_list.index(loc)
+            idx       = tabs_list.index(loc)
 
-            # Rename
             st.markdown("<p style='font-size:12px;font-weight:600;color:#475569;margin-bottom:2px;'>Rename Tab</p>", unsafe_allow_html=True)
             rc1, rc2 = st.columns([3, 1])
             with rc1:
@@ -817,9 +744,7 @@ for i, tab_ctx in enumerate(loc_tabs[:-2]):
                     elif n != loc and n in tabs_list:
                         st.warning(f"'{n}' already exists.")
                     elif n != loc:
-                        # Rename tab in list
                         st.session_state.tabs_list[idx] = n
-                        # Update all jobs referencing old location
                         for j in st.session_state.jobs:
                             if j["location"] == loc:
                                 j["location"] = n
@@ -841,13 +766,14 @@ for i, tab_ctx in enumerate(loc_tabs[:-2]):
             with oc3:
                 st.markdown(
                     f"<p style='font-size:11px;color:#94a3b8;margin:6px 0 0;'>Position {idx + 1} of {len(tabs_list)}</p>",
-                    unsafe_allow_html=True
+                    unsafe_allow_html=True,
                 )
 
         st.divider()
         render_kanban(loc, view, search, filter_priority, filter_status)
 
 # ── New Tab ───────────────────────────────────────────────────────────────────
+
 with loc_tabs[-2]:
     st.markdown("### Add a new location tab")
     new_name = st.text_input("Tab name", placeholder="e.g. Spare Parts", label_visibility="collapsed", key="new_tab_input")
@@ -863,6 +789,7 @@ with loc_tabs[-2]:
             st.rerun()
 
 # ── Archived Tabs ─────────────────────────────────────────────────────────────
+
 with loc_tabs[-1]:
     st.markdown("### Archived Tabs")
     archived = st.session_state.get("archived_tabs", [])
@@ -883,7 +810,7 @@ with loc_tabs[-1]:
             with ac3:
                 if st.button("Delete", key=f"perm_del_tab_{atab}", use_container_width=True):
                     st.session_state.archived_tabs = [t for t in st.session_state.archived_tabs if t != atab]
-                    st.session_state.jobs = [j for j in st.session_state.jobs if j["location"] != atab]
+                    st.session_state.jobs          = [j for j in st.session_state.jobs if j["location"] != atab]
                     save_data()
                     st.rerun()
             st.divider()
