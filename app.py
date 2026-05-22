@@ -335,14 +335,14 @@ def job_dialog():
         cur_s  = job["status"] if job and job["status"] in STATUSES else "Pending"
         status = st.selectbox("Status", STATUSES, index=STATUSES.index(cur_s))
 
+    all_tabs = st.session_state.tabs_list
     if not job:
-        default_loc = st.session_state.get("dlg_location", st.session_state.tabs_list[0])
-        loc_idx     = st.session_state.tabs_list.index(default_loc) if default_loc in st.session_state.tabs_list else 0
-        location    = st.selectbox("Location", st.session_state.tabs_list, index=loc_idx)
-else:
-        all_tabs = st.session_state.tabs_list
+        default_loc = st.session_state.get("dlg_location", all_tabs[0])
+        loc_idx     = all_tabs.index(default_loc) if default_loc in all_tabs else 0
+    else:
         cur_loc  = job["location"] if job["location"] in all_tabs else all_tabs[0]
-        location = st.selectbox("Location", all_tabs, index=all_tabs.index(cur_loc))
+        loc_idx  = all_tabs.index(cur_loc)
+    location = st.selectbox("Location", all_tabs, index=loc_idx)
 
     c3, c4 = st.columns(2)
     with c3:
