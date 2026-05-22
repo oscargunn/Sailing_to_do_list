@@ -710,7 +710,7 @@ for i, tab_ctx in enumerate(loc_tabs[:-1]):
     with tab_ctx:
         loc = st.session_state.tabs_list[i]
 
-        vc, _, ac, xc = st.columns([2, 4.5, 1.5, 0.5])
+        vc, _, ac = st.columns([2, 5, 1.5])
         with vc:
             view = st.radio(
                 "View", ["Active", "Archive"],
@@ -721,13 +721,6 @@ for i, tab_ctx in enumerate(loc_tabs[:-1]):
                 st.session_state.dlg_job_id   = None
                 st.session_state.dlg_location = loc
                 st.session_state.dlg_open     = True
-                st.rerun()
-
- with xc:
-            if st.button("✕", key=f"del_tab_{loc}", help=f"Delete {loc} tab", use_container_width=True):
-                st.session_state.tabs_list = [t for t in st.session_state.tabs_list if t != loc]
-                st.session_state.jobs = [j for j in st.session_state.jobs if j["location"] != loc]
-                save_data()
                 st.rerun()
 
         st.divider()
