@@ -27,6 +27,12 @@ STATUS_STYLES = {
 DEFAULT_TABS = ["Europe", "NZ General", "LA Boat", "R1047", "Rigs", "New Boat"]
 STORAGE_FILE = "jobs_data.json"
 
+KNOWN_EMAILS = [
+    "oscargunn0@gmail.com",
+    "mattias.coutts1@gmail.com",
+    "dgg1000@gmail.com",
+]
+
 RAW_SEED = [
     ["Fair in bow dent","Europe","Archived","Medium","",""],
     ["Fair in hull scratch","Europe","Archived","Medium","",""],
@@ -190,16 +196,18 @@ RAW_SEED = [
 
 def send_email(to_addr: str, subject: str, body: str):
     try:
-        cfg = st.secrets["email"]
-        # Support multiple comma-separated addresses
+        cfg        = st.secrets["email"]
         recipients = [a.strip() for a in to_addr.split(",") if a.strip()]
-        msg = MIMEText(body)
-        msg["Subject"] = subject
-        msg["From"]    = cfg["sender"]
-        msg["To"]      = ", ".join(recipients)
+        if not recipients:
+            return False
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
             s.login(cfg["sender"], cfg["password"])
-            s.sendmail(cfg["sender"], recipients, msg.as_string())
+            for recipient in recipients:
+                msg = MIMEText(body)
+                msg["Subject"] = subject
+                msg["From"]    = cfg["sender"]
+                msg["To"]      = recipient
+                s.sendmail(cfg["sender"], [recipient], msg.as_string())
         return True
     except Exception as e:
         st.session_state["email_toast_error"] = f"Email failed: {e}"
@@ -354,11 +362,29 @@ def job_dialog():
     with c4:
         assigned_name = st.text_input("Assigned Name", value=job.get("assignedName", "") if job else "")
 
-    assigned_email = st.text_input(
-        "Assigned Email",
-        value=job.get("assignedEmail", "") if job else "",
-        help="An email notification will be sent automatically when a new job is created with an email address.",
+    st.markdown("<p style='font-size:14px;font-weight:500;margin-bottom:4px;'>Assigned Emails</p>", unsafe_allow_html=True)
+
+    # Parse existing emails for pre-selection
+    existing_emails = [e.strip() for e in (job.get("assignedEmail", "") if job else "").split(",") if e.strip()]
+    known_selected  = [e for e in existing_emails if e in KNOWN_EMAILS]
+    custom_existing = ", ".join([e for e in existing_emails if e not in KNOWN_EMAILS])
+
+    selected_known = st.multiselect(
+        "Known contacts",
+        options=KNOWN_EMAILS,
+        default=known_selected,
+        label_visibility="collapsed",
+        placeholder="Select from known contacts...",
     )
+    custom_email = st.text_input(
+        "Other email(s)",
+        value=custom_existing,
+        placeholder="Other addresses, comma-separated",
+        label_visibility="collapsed",
+    )
+    # Combine known + custom into one comma-separated string
+    all_custom = [e.strip() for e in custom_email.split(",") if e.strip()]
+    assigned_email = ", ".join(selected_known + all_custom)
     notes = st.text_area("Notes", value=job.get("notes", "") if job else "", height=70)
 
     sc, cc = st.columns(2)
