@@ -731,11 +731,9 @@ for i, tab_ctx in enumerate(loc_tabs[:-2]):
                 st.rerun()
         with arc:
             if st.button("Archive Tab", key=f"arc_tab_{loc}", use_container_width=True):
-                # Archive all jobs in this tab
                 for j in st.session_state.jobs:
                     if j["location"] == loc:
                         j["status"] = "Archived"
-                # Move tab to archived_tabs
                 st.session_state.tabs_list = [t for t in st.session_state.tabs_list if t != loc]
                 st.session_state.archived_tabs.append(loc)
                 save_data()
@@ -746,6 +744,54 @@ for i, tab_ctx in enumerate(loc_tabs[:-2]):
                 st.session_state.jobs = [j for j in st.session_state.jobs if j["location"] != loc]
                 save_data()
                 st.rerun()
+
+        # ── Tab Settings expander ──────────────────────────────────────────────
+        with st.expander("Tab Settings"):
+            tabs_list = st.session_state.tabs_list
+            idx = tabs_list.index(loc)
+
+            # Rename
+            st.markdown("<p style='font-size:12px;font-weight:600;color:#475569;margin-bottom:2px;'>Rename Tab</p>", unsafe_allow_html=True)
+            rc1, rc2 = st.columns([3, 1])
+            with rc1:
+                new_name_val = st.text_input(
+                    "New name", value=loc, key=f"rename_{loc}",
+                    label_visibility="collapsed", placeholder="New tab name"
+                )
+            with rc2:
+                if st.button("Save", key=f"rename_save_{loc}", type="primary", use_container_width=True):
+                    n = new_name_val.strip()
+                    if not n:
+                        st.warning("Name cannot be empty.")
+                    elif n != loc and n in tabs_list:
+                        st.warning(f"'{n}' already exists.")
+                    elif n != loc:
+                        # Rename tab in list
+                        st.session_state.tabs_list[idx] = n
+                        # Update all jobs referencing old location
+                        for j in st.session_state.jobs:
+                            if j["location"] == loc:
+                                j["location"] = n
+                        save_data()
+                        st.rerun()
+
+            st.markdown("<p style='font-size:12px;font-weight:600;color:#475569;margin:8px 0 2px;'>Reorder Tab</p>", unsafe_allow_html=True)
+            oc1, oc2, oc3 = st.columns([1, 1, 4])
+            with oc1:
+                if st.button("← Left", key=f"move_left_{loc}", use_container_width=True, disabled=(idx == 0)):
+                    tabs_list[idx], tabs_list[idx - 1] = tabs_list[idx - 1], tabs_list[idx]
+                    save_data()
+                    st.rerun()
+            with oc2:
+                if st.button("Right →", key=f"move_right_{loc}", use_container_width=True, disabled=(idx == len(tabs_list) - 1)):
+                    tabs_list[idx], tabs_list[idx + 1] = tabs_list[idx + 1], tabs_list[idx]
+                    save_data()
+                    st.rerun()
+            with oc3:
+                st.markdown(
+                    f"<p style='font-size:11px;color:#94a3b8;margin:6px 0 0;'>Position {idx + 1} of {len(tabs_list)}</p>",
+                    unsafe_allow_html=True
+                )
 
         st.divider()
         render_kanban(loc, view, search, filter_priority, filter_status)
