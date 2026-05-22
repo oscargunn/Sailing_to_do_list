@@ -245,14 +245,18 @@ def load_data() -> tuple:
         try:
             with open(STORAGE_FILE) as f:
                 d = json.load(f)
-            return d.get("jobs", make_seed()), d.get("tabs", list(DEFAULT_TABS))
+            return d.get("jobs", make_seed()), d.get("tabs", list(DEFAULT_TABS)), d.get("archived_tabs", [])
         except Exception:
             pass
-    return make_seed(), list(DEFAULT_TABS)
+    return make_seed(), list(DEFAULT_TABS), []
 
 def save_data():
     with open(STORAGE_FILE, "w") as f:
-        json.dump({"jobs": st.session_state.jobs, "tabs": st.session_state.tabs_list}, f, indent=2)
+        json.dump({
+            "jobs": st.session_state.jobs,
+            "tabs": st.session_state.tabs_list,
+            "archived_tabs": st.session_state.archived_tabs,
+        }, f, indent=2)
 
 # ── Mutations ─────────────────────────────────────────────────────────────────
 
@@ -503,14 +507,15 @@ def render_kanban(location: str, view: str, search: str, filter_priority: str, f
 # ── Session state init ────────────────────────────────────────────────────────
 
 if "initialized" not in st.session_state:
-    jobs, tabs = load_data()
+    jobs, tabs, archived_tabs = load_data()
     st.session_state.update({
-        "jobs":         jobs,
-        "tabs_list":    tabs,
-        "dlg_open":     False,
-        "dlg_job_id":   None,
-        "dlg_location": tabs[0] if tabs else DEFAULT_TABS[0],
-        "initialized":  True,
+        "jobs":          jobs,
+        "tabs_list":     tabs,
+        "archived_tabs": archived_tabs,
+        "dlg_open":      False,
+        "dlg_job_id":    None,
+        "dlg_location":  tabs[0] if tabs else DEFAULT_TABS[0],
+        "initialized":   True,
     })
 
 auto_archive()
@@ -703,14 +708,16 @@ for loc in st.session_state.tabs_list:
     n = sum(1 for j in st.session_state.jobs if j["location"] == loc and j["status"] != "Archived")
     tab_labels.append(f"{loc}  ({n})")
 tab_labels.append("+ New Tab")
+archived_count = len(st.session_state.get("archived_tabs", []))
+tab_labels.append(f"Archived Tabs  ({archived_count})" if archived_count else "Archived Tabs")
 
 loc_tabs = st.tabs(tab_labels)
 
-for i, tab_ctx in enumerate(loc_tabs[:-1]):
+for i, tab_ctx in enumerate(loc_tabs[:-2]):
     with tab_ctx:
         loc = st.session_state.tabs_list[i]
 
-        vc, _, ac = st.columns([2, 5, 1.5])
+        vc, _, ac, arc, dc = st.columns([2, 2.5, 1.5, 1.5, 1.5])
         with vc:
             view = st.radio(
                 "View", ["Active", "Archive"],
@@ -722,11 +729,29 @@ for i, tab_ctx in enumerate(loc_tabs[:-1]):
                 st.session_state.dlg_location = loc
                 st.session_state.dlg_open     = True
                 st.rerun()
+        with arc:
+            if st.button("Archive Tab", key=f"arc_tab_{loc}", use_container_width=True):
+                # Archive all jobs in this tab
+                for j in st.session_state.jobs:
+                    if j["location"] == loc:
+                        j["status"] = "Archived"
+                # Move tab to archived_tabs
+                st.session_state.tabs_list = [t for t in st.session_state.tabs_list if t != loc]
+                st.session_state.archived_tabs.append(loc)
+                save_data()
+                st.rerun()
+        with dc:
+            if st.button("Delete Tab", key=f"del_tab_{loc}", use_container_width=True):
+                st.session_state.tabs_list = [t for t in st.session_state.tabs_list if t != loc]
+                st.session_state.jobs = [j for j in st.session_state.jobs if j["location"] != loc]
+                save_data()
+                st.rerun()
 
         st.divider()
         render_kanban(loc, view, search, filter_priority, filter_status)
 
-with loc_tabs[-1]:
+# ── New Tab ───────────────────────────────────────────────────────────────────
+with loc_tabs[-2]:
     st.markdown("### Add a new location tab")
     new_name = st.text_input("Tab name", placeholder="e.g. Spare Parts", label_visibility="collapsed", key="new_tab_input")
     if st.button("Create Tab", type="primary"):
@@ -739,6 +764,32 @@ with loc_tabs[-1]:
             st.session_state.tabs_list.append(n)
             save_data()
             st.rerun()
+
+# ── Archived Tabs ─────────────────────────────────────────────────────────────
+with loc_tabs[-1]:
+    st.markdown("### Archived Tabs")
+    archived = st.session_state.get("archived_tabs", [])
+    if not archived:
+        st.caption("No archived tabs.")
+    else:
+        for atab in archived:
+            job_count = sum(1 for j in st.session_state.jobs if j["location"] == atab)
+            ac1, ac2, ac3 = st.columns([4, 1.5, 1.5])
+            with ac1:
+                st.markdown(f"**{atab}** &nbsp; <span style='font-size:12px;color:#94a3b8;'>{job_count} jobs</span>", unsafe_allow_html=True)
+            with ac2:
+                if st.button("Restore", key=f"restore_tab_{atab}", type="primary", use_container_width=True):
+                    st.session_state.archived_tabs = [t for t in st.session_state.archived_tabs if t != atab]
+                    st.session_state.tabs_list.append(atab)
+                    save_data()
+                    st.rerun()
+            with ac3:
+                if st.button("Delete", key=f"perm_del_tab_{atab}", use_container_width=True):
+                    st.session_state.archived_tabs = [t for t in st.session_state.archived_tabs if t != atab]
+                    st.session_state.jobs = [j for j in st.session_state.jobs if j["location"] != atab]
+                    save_data()
+                    st.rerun()
+            st.divider()
 
 # ── Open dialog if flagged ────────────────────────────────────────────────────
 
