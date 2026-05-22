@@ -28,7 +28,7 @@ DEFAULT_TABS = ["Europe", "NZ General", "LA Boat", "R1047", "Rigs", "New Boat"]
 STORAGE_FILE = "jobs_data.json"
 
 KNOWN_EMAILS = [
-    "oscargunn0@gmail.com",
+    "0oscargunn0@gmail.com",
     "mattias.coutts1@gmail.com",
     "dgg1000@gmail.com",
 ]
