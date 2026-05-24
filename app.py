@@ -764,8 +764,9 @@ def job_dialog():
 # ── Card helpers ──────────────────────────────────────────────────────────────
 
 def badge(text: str, style: dict) -> str:
+    cls = "badge badge-" + text.lower().replace(" ", "-")
     return (
-        f'<span style="background:{style["bg"]};color:{style["color"]};'
+        f'<span class="{cls}" style="background:{style["bg"]};color:{style["color"]};'
         f'padding:2px 10px;border-radius:4px;font-size:11px;font-weight:600;'
         f'letter-spacing:0.03em;display:inline-block;margin:2px;">{text.upper()}</span>'
     )
@@ -1066,6 +1067,16 @@ div[data-testid="stVerticalBlockBorderWrapper"]
         background-color: #262626 !important;
     }
     div[data-testid="stVerticalBlockBorderWrapper"] > div { background-color: #262626 !important; }
+
+    /* Priority & status badges — override inline styles so they're readable */
+    .badge-low         { background: #1e3a5f !important; color: #93c5fd !important; }
+    .badge-medium      { background: #431407 !important; color: #fdba74 !important; }
+    .badge-high        { background: #3b0764 !important; color: #d8b4fe !important; }
+    .badge-urgent      { background: #450a0a !important; color: #fca5a5 !important; }
+    .badge-pending     { background: #4a044e !important; color: #f0abfc !important; }
+    .badge-in-progress { background: #431407 !important; color: #fdba74 !important; }
+    .badge-completed   { background: #052e16 !important; color: #86efac !important; }
+    .badge-archived    { background: #1e293b !important; color: #94a3b8 !important; }
 
     /* Card title buttons in dark mode */
     div[data-testid="stVerticalBlockBorderWrapper"]
