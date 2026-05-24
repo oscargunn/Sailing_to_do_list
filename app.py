@@ -1277,6 +1277,8 @@ div[data-testid="stVerticalBlockBorderWrapper"]
     justify-content: flex-start !important;
     letter-spacing: -0.01em !important;
     line-height: 1.4 !important;
+    white-space: normal !important;
+    word-break: break-word !important;
 }
 div[data-testid="stVerticalBlockBorderWrapper"]
     > div
