@@ -599,34 +599,39 @@ def render_dashboard():
     n_overdue = sum(1 for j in active if _is_overdue(j))
     n_urgent  = sum(1 for j in active if effective_priority(j) == "Urgent" and not _is_overdue(j))
 
-    # ── Metric tiles (clickable — toggle pop-out list below) ──────
+    # ── Metric tiles — compact, clickable, no separate button ────────
     dash_filter = st.session_state.get("dash_filter")
     metrics = [
         ("Total Active", total,     "total"),
         ("Pending",      pending,   "Pending"),
         ("In Progress",  in_prog,   "In Progress"),
         ("Completed",    completed, "Completed"),
-        ("🔴 Overdue",   n_overdue, "overdue"),
-        ("⚡ Urgent",    n_urgent,  "urgent"),
+        ("Overdue",      n_overdue, "overdue"),
+        ("Urgent",       n_urgent,  "urgent"),
     ]
     cols = st.columns(6)
     for col, (label, count, key) in zip(cols, metrics):
         with col:
-            is_active = dash_filter == key
-            tile_bg   = "#f0f4ff" if is_active else "#f8fafc"
-            tile_bdr  = "#2563eb" if is_active else "#e2e8f0"
+            is_active  = dash_filter == key
+            active_cls = " mt-active" if is_active else ""
+            # onclick walks up to the stVerticalBlock and clicks the hidden backing button
+            js = (
+                "(function(el){"
+                "var v=el.closest('[data-testid=stVerticalBlock]');"
+                "if(v){var b=v.querySelector('[data-testid=stButton] button');if(b)b.click();}"
+                "})(this)"
+            )
             st.markdown(
-                f"<div style='background:{tile_bg};border:1px solid {tile_bdr};"
-                f"border-radius:8px;padding:12px 16px;text-align:center;margin-bottom:4px;'>"
-                f"<div style='font-size:26px;font-weight:700;color:#0f172a;'>{count}</div>"
-                f"<div style='font-size:11px;color:#64748b;font-weight:500;'>{label}</div>"
-                f"</div>",
+                f'<div class="metric-tile{active_cls}" onclick="{js}">'
+                f'<div class="metric-count">{count}</div>'
+                f'<div class="metric-label">{label}</div>'
+                f'</div>',
                 unsafe_allow_html=True,
             )
-            btn_label = "▲ Hide" if is_active else "View all"
-            if st.button(btn_label, key=f"df_{key}", use_container_width=True):
-                st.session_state.dash_filter        = None if is_active else key
-                st.session_state.add_contact_open   = False
+            # Hidden zero-height Streamlit button — receives the click from JS above
+            if st.button("", key=f"df_{key}", use_container_width=True):
+                st.session_state.dash_filter         = None if is_active else key
+                st.session_state.add_contact_open    = False
                 st.session_state.assignee_modal_open = False
                 st.rerun()
 
@@ -637,10 +642,10 @@ def render_dashboard():
             heading  = "All Active Jobs"
         elif dash_filter == "overdue":
             filtered = [j for j in active if _is_overdue(j)]
-            heading  = "🔴 Overdue Jobs"
+            heading  = "Overdue Jobs"
         elif dash_filter == "urgent":
             filtered = [j for j in active if effective_priority(j) == "Urgent" and not _is_overdue(j)]
-            heading  = "⚡ Urgent Jobs"
+            heading  = "Urgent Jobs"
         else:
             filtered = [j for j in active if j["status"] == dash_filter]
             heading  = f"{dash_filter} Jobs"
@@ -1284,8 +1289,72 @@ div[data-testid="stVerticalBlockBorderWrapper"]
     text-decoration: underline !important;
 }
 
+/* ── Metric tiles ────────────────────────────────────────────────── */
+.metric-tile {
+    text-align: center;
+    padding: 10px 6px 8px;
+    border-radius: 10px;
+    background: #f8fafc;
+    border: 1px solid #e8ecf0;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    transition: box-shadow 0.15s ease, transform 0.15s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.metric-tile:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    transform: translateY(-1px);
+}
+.metric-tile.mt-active {
+    border: 2px solid #2563eb;
+    background: #eff6ff;
+}
+.metric-count {
+    font-size: 22px;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.1;
+}
+.metric-label {
+    font-size: 10px;
+    color: #64748b;
+    margin-top: 3px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+/* Collapse the hidden backing Streamlit buttons for metric tiles */
+[data-testid="stVerticalBlock"]:has(.metric-tile) > [data-testid="element-container"] + [data-testid="element-container"] {
+    margin: 0 !important;
+    padding: 0 !important;
+    line-height: 0 !important;
+}
+[data-testid="stVerticalBlock"]:has(.metric-tile) > [data-testid="element-container"] + [data-testid="element-container"] button {
+    height: 0 !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    overflow: hidden !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+    display: block !important;
+    pointer-events: none !important;
+}
+
 /* ── Dark mode (mirrors OS preference) ─────────────────────────────── */
 @media (prefers-color-scheme: dark) {
+    /* Metric tiles */
+    .metric-tile { background: #262626; border-color: #2e2e2e; box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
+    .metric-tile:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+    .metric-tile.mt-active { background: #1a2744; border-color: #2563eb; }
+    .metric-count { color: #ececec; }
+    .metric-label { color: #6b7280; }
+
     /* App background */
     .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
     section[data-testid="stMain"] > div { background-color: #1e1e1e !important; }
@@ -1538,7 +1607,7 @@ st.markdown("---")
 # ── Location tabs ─────────────────────────────────────────────────────────────
 
 n_overdue_all = sum(1 for j in st.session_state.jobs if _is_overdue(j))
-tab_labels = ["📊 Dashboard" + (" 🔴" if n_overdue_all else "")]
+tab_labels = ["Dashboard"]
 for loc in st.session_state.tabs_list:
     n = sum(1 for j in st.session_state.jobs if j["location"] == loc and j["status"] != "Archived")
     tab_labels.append(f"{loc}  ({n})")
