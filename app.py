@@ -1208,11 +1208,19 @@ hr { border-color: #e2e8f0 !important; margin: 0.75rem 0 !important; }
 .stTabs [data-baseweb="tab-border"]    { display: none !important; }
 
 div[data-testid="stVerticalBlockBorderWrapper"] {
-    border-radius: 2px !important; border-color: #e2e8f0 !important;
-    padding: 0px !important; margin-bottom: 4px !important;
+    border-radius: 10px !important;
+    border-color: #e8ecf0 !important;
+    padding: 0px !important;
+    margin-bottom: 8px !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.04) !important;
+    transition: box-shadow 0.15s ease, transform 0.15s ease !important;
 }
-div[data-testid="stVerticalBlockBorderWrapper"] > div { padding: 4px 8px !important; }
-div[data-testid="stVerticalBlockBorderWrapper"] p { margin: 0 !important; line-height: 1.3 !important; }
+div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.05) !important;
+    transform: translateY(-1px) !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"] > div { padding: 12px 14px !important; }
+div[data-testid="stVerticalBlockBorderWrapper"] p { margin: 0 !important; line-height: 1.4 !important; }
 div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox > div { min-height: 28px !important; }
 div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox [data-baseweb="select"] > div {
     padding-top: 2px !important; padding-bottom: 2px !important; min-height: 28px !important; font-size: 11px !important;
@@ -1220,21 +1228,24 @@ div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox [data-baseweb="sele
 
 .stButton button {
     font-family: 'DM Sans', sans-serif !important; font-size: 12px !important; font-weight: 500 !important;
-    border-radius: 3px !important; letter-spacing: 0.01em !important;
-    padding: 2px 6px !important; height: 28px !important; min-height: 28px !important;
+    border-radius: 8px !important; letter-spacing: 0.01em !important;
+    padding: 2px 10px !important; height: 30px !important; min-height: 30px !important;
+    transition: all 0.12s ease !important;
 }
-.stButton button[kind="primary"]         { background: #0f172a !important; border: none !important; color: white !important; }
-.stButton button[kind="primary"]:hover   { background: #1e293b !important; }
+.stButton button[kind="primary"]         { background: #0f172a !important; border: none !important; color: white !important; box-shadow: 0 1px 3px rgba(15,23,42,0.25) !important; }
+.stButton button[kind="primary"]:hover   { background: #1e293b !important; box-shadow: 0 3px 8px rgba(15,23,42,0.3) !important; transform: translateY(-1px) !important; }
 .stButton button[kind="secondary"]       { background: #f8fafc !important; border: 1px solid #e2e8f0 !important; color: #64748b !important; filter: grayscale(100%) !important; }
-.stButton button[kind="secondary"]:hover { background: #f1f5f9 !important; color: #374151 !important; }
+.stButton button[kind="secondary"]:hover { background: #f1f5f9 !important; color: #374151 !important; border-color: #cbd5e1 !important; }
 
 .stTextInput input, .stTextArea textarea, .stSelectbox select {
     font-family: 'DM Sans', sans-serif !important; font-size: 13px !important;
-    border-radius: 5px !important; border-color: #e2e8f0 !important;
+    border-radius: 8px !important; border-color: #e2e8f0 !important;
 }
-.stSelectbox [data-baseweb="select"] { border-radius: 5px !important; }
+.stSelectbox [data-baseweb="select"] { border-radius: 8px !important; }
 
-h4 { font-size: 13px !important; font-weight: 600 !important; color: #475569 !important; text-transform: uppercase !important; letter-spacing: 0.06em !important; }
+h4 { font-size: 10px !important; font-weight: 700 !important; color: #94a3b8 !important; text-transform: uppercase !important; letter-spacing: 0.10em !important; margin-bottom: 10px !important; }
+/* Pill badges */
+.badge { border-radius: 20px !important; }
 .stCaptionContainer, [data-testid="stCaptionContainer"] { color: #94a3b8 !important; font-size: 12px !important; }
 [data-testid="stToast"] { font-family: 'DM Sans', sans-serif !important; font-size: 13px !important; }
 .stRadio label { font-family: 'DM Sans', sans-serif !important; font-size: 13px !important; font-weight: 500 !important; }
@@ -1250,7 +1261,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]
     background: none !important;
     border: none !important;
     box-shadow: none !important;
-    padding: 2px 0 3px !important;
+    padding: 1px 0 4px !important;
     height: auto !important;
     min-height: auto !important;
     text-align: left !important;
@@ -1259,8 +1270,8 @@ div[data-testid="stVerticalBlockBorderWrapper"]
     color: #0f172a !important;
     width: 100% !important;
     justify-content: flex-start !important;
-    letter-spacing: 0 !important;
-    line-height: 1.3 !important;
+    letter-spacing: -0.01em !important;
+    line-height: 1.4 !important;
 }
 div[data-testid="stVerticalBlockBorderWrapper"]
     > div
@@ -1298,8 +1309,12 @@ div[data-testid="stVerticalBlockBorderWrapper"]
 
     /* Job cards */
     div[data-testid="stVerticalBlockBorderWrapper"] {
-        border-color: #3d3d3d !important;
+        border-color: #2e2e2e !important;
         background-color: #262626 !important;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2) !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        box-shadow: 0 6px 16px rgba(0,0,0,0.4), 0 2px 6px rgba(0,0,0,0.3) !important;
     }
     div[data-testid="stVerticalBlockBorderWrapper"] > div { background-color: #262626 !important; }
 
@@ -1360,8 +1375,12 @@ div[data-testid="stVerticalBlockBorderWrapper"]
         background: #2563eb !important;
         border: none !important;
         color: #ffffff !important;
+        box-shadow: 0 1px 4px rgba(37,99,235,0.35) !important;
     }
-    .stButton button[kind="primary"]:hover  { background: #1d4ed8 !important; }
+    .stButton button[kind="primary"]:hover  {
+        background: #1d4ed8 !important;
+        box-shadow: 0 4px 10px rgba(37,99,235,0.4) !important;
+    }
     .stButton button[kind="secondary"] {
         background: #2d2d2d !important;
         border: 1px solid #3d3d3d !important;
@@ -1371,6 +1390,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]
     .stButton button[kind="secondary"]:hover {
         background: #333333 !important;
         color: #ececec !important;
+        border-color: #4d4d4d !important;
     }
 
     /* Captions / muted text */
