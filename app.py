@@ -616,7 +616,9 @@ def render_dashboard():
             )
             btn_label = "▲ Hide" if is_active else "View all"
             if st.button(btn_label, key=f"df_{key}", use_container_width=True):
-                st.session_state.dash_filter = None if is_active else key
+                st.session_state.dash_filter        = None if is_active else key
+                st.session_state.add_contact_open   = False
+                st.session_state.assignee_modal_open = False
                 st.rerun()
 
     # ── Pop-out list panel ────────────────────────────────────────
@@ -739,6 +741,8 @@ def render_dashboard():
                         key=f"asgn_btn_{contact['id']}",
                         use_container_width=True,
                     ):
+                        st.session_state.dlg_open            = False
+                        st.session_state.add_contact_open    = False
                         st.session_state.modal_assignee_name = cname
                         st.session_state.assignee_modal_open = True
                         st.rerun()
@@ -757,7 +761,9 @@ def render_dashboard():
 
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("+ Add Contact", key="dash_add_contact", use_container_width=True):
-            st.session_state.add_contact_open = True
+            st.session_state.dlg_open            = False
+            st.session_state.assignee_modal_open = False
+            st.session_state.add_contact_open    = True
             st.rerun()
 
 # ── Dialog ────────────────────────────────────────────────────────────────────
@@ -1504,9 +1510,7 @@ with loc_tabs[-1]:
 
 if st.session_state.get("dlg_open"):
     job_dialog()
-
-if st.session_state.get("add_contact_open"):
+elif st.session_state.get("add_contact_open"):
     add_contact_dialog()
-
-if st.session_state.get("assignee_modal_open"):
+elif st.session_state.get("assignee_modal_open"):
     assignee_jobs_modal()
