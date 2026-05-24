@@ -703,6 +703,114 @@ h4 { font-size: 13px !important; font-weight: 600 !important; color: #475569 !im
 [data-testid="stToast"] { font-family: 'DM Sans', sans-serif !important; font-size: 13px !important; }
 .stRadio label { font-family: 'DM Sans', sans-serif !important; font-size: 13px !important; font-weight: 500 !important; }
 code { font-family: 'DM Mono', monospace !important; font-size: 11px !important; background: #f1f5f9 !important; color: #475569 !important; border-radius: 4px !important; padding: 1px 6px !important; }
+
+/* ── Dark mode (mirrors OS preference) ─────────────────────────────── */
+@media (prefers-color-scheme: dark) {
+    /* App background */
+    .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"],
+    section[data-testid="stMain"] > div { background-color: #1e1e1e !important; }
+
+    /* Block container */
+    .block-container { background-color: #1e1e1e !important; }
+
+    /* General text */
+    html, body, p, span, li, label, div { color: #ececec; }
+    [class*="css"] { color: #ececec; }
+
+    /* App header */
+    .app-title    { color: #ececec !important; }
+    .app-subtitle { color: #9ca3af !important; }
+
+    /* Column headings (Pending / In Progress / Completed / Archived) */
+    h4 { color: #9ca3af !important; }
+
+    /* Horizontal rules */
+    hr { border-color: #333333 !important; }
+
+    /* Job cards */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        border-color: #3d3d3d !important;
+        background-color: #262626 !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] > div { background-color: #262626 !important; }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        border-bottom: 1px solid #333333 !important;
+        background: transparent !important;
+    }
+    .stTabs [data-baseweb="tab"]   { color: #9ca3af !important; }
+    .stTabs [aria-selected="true"] { color: #ececec !important; border-bottom-color: #ececec !important; }
+
+    /* Text inputs & text areas */
+    .stTextInput input, .stTextArea textarea {
+        background-color: #2d2d2d !important;
+        border-color: #3d3d3d !important;
+        color: #ececec !important;
+    }
+    .stTextInput input::placeholder, .stTextArea textarea::placeholder { color: #6b7280 !important; }
+
+    /* Selectboxes */
+    .stSelectbox [data-baseweb="select"] > div,
+    [data-baseweb="select"] > div {
+        background-color: #2d2d2d !important;
+        border-color: #3d3d3d !important;
+        color: #ececec !important;
+    }
+    [data-baseweb="popover"], [data-baseweb="menu"] {
+        background-color: #2d2d2d !important;
+    }
+    [data-baseweb="option"]:hover { background-color: #3d3d3d !important; }
+
+    /* Buttons */
+    .stButton button[kind="primary"] {
+        background: #2563eb !important;
+        border: none !important;
+        color: #ffffff !important;
+    }
+    .stButton button[kind="primary"]:hover  { background: #1d4ed8 !important; }
+    .stButton button[kind="secondary"] {
+        background: #2d2d2d !important;
+        border: 1px solid #3d3d3d !important;
+        color: #9ca3af !important;
+        filter: none !important;
+    }
+    .stButton button[kind="secondary"]:hover {
+        background: #333333 !important;
+        color: #ececec !important;
+    }
+
+    /* Captions / muted text */
+    .stCaptionContainer, [data-testid="stCaptionContainer"] { color: #6b7280 !important; }
+
+    /* Inline code badges */
+    code {
+        background: #2d2d2d !important;
+        color: #a5b4fc !important;
+    }
+
+    /* Toast notifications */
+    [data-testid="stToast"] {
+        background-color: #262626 !important;
+        color: #ececec !important;
+    }
+
+    /* Dialog / modal */
+    [role="dialog"], [data-testid="stDialog"],
+    [data-testid="stDialog"] > div,
+    [data-testid="stDialog"] [data-testid="stVerticalBlock"] {
+        background-color: #262626 !important;
+    }
+    [data-testid="stDialogDismissButton"] svg { stroke: #9ca3af !important; }
+
+    /* Radio buttons */
+    .stRadio label { color: #ececec !important; }
+
+    /* Markdown text */
+    [data-testid="stMarkdownContainer"] p,
+    [data-testid="stMarkdownContainer"] span { color: #ececec !important; }
+    [data-testid="stMarkdownContainer"] strong { color: #f0f0f0 !important; }
+}
 </style>
 """, unsafe_allow_html=True)
 
