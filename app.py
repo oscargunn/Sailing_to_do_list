@@ -1404,6 +1404,101 @@ div[data-testid="stVerticalBlockBorderWrapper"]
     [data-testid="stMarkdownContainer"] span { color: #ececec !important; }
     [data-testid="stMarkdownContainer"] strong { color: #f0f0f0 !important; }
 }
+
+/* ── Mobile responsive ──────────────────────────────────────────── */
+@media (max-width: 768px) {
+
+    /* Tighten page padding */
+    .block-container {
+        padding: 2.5rem 0.5rem 1rem !important;
+        max-width: 100% !important;
+    }
+
+    /* Columns: wrap into a 2-wide grid.
+       Metric tiles (6 cols) → 3 rows × 2  ✓
+       Kanban (3 cols)        → 2 + 1 rows  ✓
+       Dashboard side cols    → stacked     ✓  */
+    [data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+        gap: 6px !important;
+    }
+    [data-testid="column"] {
+        flex: 1 1 calc(50% - 6px) !important;
+        min-width: calc(50% - 6px) !important;
+        width: calc(50% - 6px) !important;
+    }
+
+    /* Tab bar: allow horizontal scroll, hide the scrollbar */
+    .stTabs [data-baseweb="tab-list"] {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        scrollbar-width: none !important;
+        flex-wrap: nowrap !important;
+    }
+    .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { display: none !important; }
+    .stTabs [data-baseweb="tab"] {
+        font-size: 12px !important;
+        padding: 8px 12px !important;
+        white-space: nowrap !important;
+    }
+
+    /* Bigger touch targets for all buttons */
+    .stButton button {
+        min-height: 44px !important;
+        font-size: 14px !important;
+        padding: 8px 12px !important;
+        height: auto !important;
+    }
+
+    /* Card title buttons stay text-like but easier to tap */
+    div[data-testid="stVerticalBlockBorderWrapper"]
+        > div
+        > [data-testid="stVerticalBlock"]
+        > [data-testid="element-container"]
+        > .stButton
+        > button {
+        font-size: 14px !important;
+        padding: 6px 0 8px !important;
+        min-height: 36px !important;
+    }
+
+    /* Dialogs: fill the screen width */
+    [data-testid="stDialog"] > div {
+        max-width: 96vw !important;
+        width: 96vw !important;
+        margin: 0 auto !important;
+    }
+
+    /* Selectboxes: full width, taller hit area */
+    .stSelectbox [data-baseweb="select"] > div {
+        min-height: 44px !important;
+        font-size: 14px !important;
+    }
+
+    /* Text inputs: larger on mobile */
+    .stTextInput input, .stTextArea textarea {
+        font-size: 16px !important; /* prevents iOS zoom-on-focus */
+        min-height: 44px !important;
+    }
+
+    /* Metric tile numbers: slightly smaller so they fit 2-wide */
+    .block-container div[style*="font-size:26px"] {
+        font-size: 22px !important;
+    }
+
+    /* Kanban column headers */
+    h4 { font-size: 11px !important; }
+}
+
+/* ── Phone-only — truly tiny screens (≤400px) ───────────────────── */
+@media (max-width: 400px) {
+    /* Single-column everything */
+    [data-testid="column"] {
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+        width: 100% !important;
+    }
+}
 </style>
 """, unsafe_allow_html=True)
 
