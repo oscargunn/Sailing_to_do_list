@@ -1,6 +1,7 @@
 import streamlit as st
 import json
 import os
+import re
 import random
 import string
 import smtplib
@@ -39,6 +40,13 @@ KNOWN_EMAILS = [
     "0oscargunn0@gmail.com",
     "mattias.coutts1@gmail.com",
     "dgg1000@gmail.com",
+]
+
+# Seed contacts — used if the contacts list is empty on first load
+DEFAULT_CONTACTS = [
+    {"id": "c001", "name": "Oscar",   "email": "0oscargunn0@gmail.com"},
+    {"id": "c002", "name": "Mattias", "email": "mattias.coutts1@gmail.com"},
+    {"id": "c003", "name": "David",   "email": "dgg1000@gmail.com"},
 ]
 
 RAW_SEED = [
@@ -311,6 +319,11 @@ def effective_priority(job: dict) -> str:
             pass
     return PRIORITY_LEVELS[rank]
 
+def job_assignees(job: dict) -> list:
+    """Return list of individual assignee name strings (handles / and , separators)."""
+    raw = job.get("assignedName") or ""
+    return [n.strip() for n in re.split(r"[,/]", raw) if n.strip()]
+
 def _is_overdue(job: dict) -> bool:
     """True when a non-completed job is past its due date."""
     due = job.get("dueDate")
@@ -344,28 +357,39 @@ def load_data() -> tuple:
             result = sb.table("app_state").select("data").eq("id", 1).execute()
             if result.data:
                 d = result.data[0]["data"]
-                if d.get("jobs"):          # non-empty cloud record wins
-                    return d.get("jobs", make_seed()), d.get("tabs", list(DEFAULT_TABS)), d.get("archived_tabs", [])
+                if d.get("jobs"):
+                    return (
+                        d.get("jobs", make_seed()),
+                        d.get("tabs", list(DEFAULT_TABS)),
+                        d.get("archived_tabs", []),
+                        d.get("contacts", list(DEFAULT_CONTACTS)),
+                    )
         except Exception as e:
             st.session_state["supabase_load_error"] = f"Supabase load failed: {e}"
 
-    # 2 — fall back to local JSON (local dev without Supabase credentials)
+    # 2 — fall back to local JSON
     if os.path.exists(STORAGE_FILE):
         try:
             with open(STORAGE_FILE) as f:
                 d = json.load(f)
-            return d.get("jobs", make_seed()), d.get("tabs", list(DEFAULT_TABS)), d.get("archived_tabs", [])
+            return (
+                d.get("jobs", make_seed()),
+                d.get("tabs", list(DEFAULT_TABS)),
+                d.get("archived_tabs", []),
+                d.get("contacts", list(DEFAULT_CONTACTS)),
+            )
         except Exception:
             pass
 
     # 3 — first run: return seed data
-    return make_seed(), list(DEFAULT_TABS), []
+    return make_seed(), list(DEFAULT_TABS), [], list(DEFAULT_CONTACTS)
 
 def save_data():
     payload = {
         "jobs":          st.session_state.jobs,
         "tabs":          st.session_state.tabs_list,
         "archived_tabs": st.session_state.archived_tabs,
+        "contacts":      st.session_state.get("contacts", list(DEFAULT_CONTACTS)),
     }
     # 1 — save to Supabase (primary, cloud-persistent)
     sb = _get_supabase()
@@ -441,6 +465,117 @@ def upsert_job(data: dict, job_id: str | None = None):
         else:
             st.session_state["email_toast_error"] = f"Email failed — check Streamlit secrets."
 
+# ── Modal card (simplified card for use inside dialogs) ───────────────────────
+
+def render_modal_card(j: dict, mk: str):
+    """Compact card for modal views — title opens the job dialog, no inline status select."""
+    is_ov = _is_overdue(j)
+    with st.container(border=True):
+        if is_ov:
+            st.markdown(
+                '<div style="background:#ef4444;height:3px;margin:-4px -8px 6px;'
+                'border-radius:1px 1px 0 0;"></div>', unsafe_allow_html=True,
+            )
+        if st.button(j["title"], key=f"mc_{mk}_{j['id']}", use_container_width=True):
+            # Close any open modal, then open the job dialog
+            st.session_state.assignee_modal_open = False
+            st.session_state.dlg_job_id          = j["id"]
+            st.session_state.dlg_open            = True
+            st.rerun()
+        eff_p = effective_priority(j)
+        meta  = []
+        if j.get("dueDate"):
+            try:
+                dl = (date.fromisoformat(j["dueDate"]) - date.today()).days
+                if dl < 0:    meta.append(f"🔴 Overdue {-dl}d")
+                elif dl == 0: meta.append("Due today")
+                else:         meta.append(f"Due {j['dueDate']}")
+            except ValueError:
+                pass
+        if j.get("assignedName"): meta.append(j["assignedName"])
+        meta_html = f"<p style='font-size:11px;color:#94a3b8;margin:2px 0;'>{'  ·  '.join(meta)}</p>" if meta else ""
+        st.markdown(
+            badge(eff_p, PRIORITY_STYLES[eff_p]) + " " +
+            badge(j["status"], STATUS_STYLES[j["status"]]) + meta_html,
+            unsafe_allow_html=True,
+        )
+
+# ── Contacts dialogs ───────────────────────────────────────────────────────────
+
+@st.dialog("Add Contact", width="small")
+def add_contact_dialog():
+    st.markdown("Add a new team member. They'll appear in the assignment picker on all job cards.")
+    name  = st.text_input("Name *", placeholder="e.g. Hugo")
+    email = st.text_input("Email",  placeholder="e.g. hugo@team.com")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Add", type="primary", use_container_width=True):
+            n = name.strip()
+            if not n:
+                st.error("Name is required.")
+                return
+            if any(c["name"].lower() == n.lower() for c in st.session_state.contacts):
+                st.warning(f"'{n}' already exists.")
+                return
+            st.session_state.contacts.append({"id": gen_id(), "name": n, "email": email.strip()})
+            save_data()
+            st.session_state.add_contact_open = False
+            st.rerun()
+    with c2:
+        if st.button("Cancel", use_container_width=True):
+            st.session_state.add_contact_open = False
+            st.rerun()
+
+@st.dialog("Team Member", width="large")
+def assignee_jobs_modal():
+    name    = st.session_state.get("modal_assignee_name", "")
+    contact = next((c for c in st.session_state.contacts if c["name"] == name), None)
+
+    st.markdown(f"### 👤 {name}")
+    if contact and contact.get("email"):
+        st.caption(contact["email"])
+
+    # Collect jobs for this contact (match by email first, then by name)
+    all_active = [j for j in st.session_state.jobs if j["status"] != "Archived"]
+    if contact and contact.get("email"):
+        email = contact["email"]
+        jobs = [
+            j for j in all_active
+            if name in job_assignees(j)
+            or email in {e.strip() for e in j.get("assignedEmail","").split(",") if e.strip()}
+        ]
+    else:
+        jobs = [j for j in all_active if name in job_assignees(j)]
+
+    jobs.sort(key=lambda j: (-PRIORITY_RANK[effective_priority(j)], j.get("dueDate") or "9999"))
+
+    st.divider()
+    if not jobs:
+        st.info("No active jobs assigned to this person.")
+    else:
+        st.caption(f"{len(jobs)} active job{'s' if len(jobs) != 1 else ''}")
+        cols = st.columns(3)
+        for i, j in enumerate(jobs):
+            with cols[i % 3]:
+                render_modal_card(j, "asgn")
+
+    st.divider()
+    if contact:
+        dc1, dc2 = st.columns([4, 1])
+        with dc1:
+            st.caption("Remove this contact from the team list (existing job assignments are kept).")
+        with dc2:
+            if st.button("Remove", key="del_contact_modal", use_container_width=True):
+                st.session_state.contacts = [
+                    c for c in st.session_state.contacts if c["name"] != name
+                ]
+                save_data()
+                st.session_state.assignee_modal_open = False
+                st.rerun()
+    if st.button("Close", use_container_width=True):
+        st.session_state.assignee_modal_open = False
+        st.rerun()
+
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
 def render_dashboard():
@@ -455,20 +590,68 @@ def render_dashboard():
     n_overdue = sum(1 for j in active if _is_overdue(j))
     n_urgent  = sum(1 for j in active if effective_priority(j) == "Urgent" and not _is_overdue(j))
 
-    # ── Metric strip ──────────────────────────────────────────────
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
-    with m1: st.metric("Total Active", total)
-    with m2: st.metric("Pending", pending)
-    with m3: st.metric("In Progress", in_prog)
-    with m4: st.metric("Completed", completed)
-    with m5: st.metric("🔴 Overdue", n_overdue)
-    with m6: st.metric("⚡ Urgent", n_urgent)
+    # ── Metric tiles (clickable — toggle pop-out list below) ──────
+    dash_filter = st.session_state.get("dash_filter")
+    metrics = [
+        ("Total Active", total,     "total"),
+        ("Pending",      pending,   "Pending"),
+        ("In Progress",  in_prog,   "In Progress"),
+        ("Completed",    completed, "Completed"),
+        ("🔴 Overdue",   n_overdue, "overdue"),
+        ("⚡ Urgent",    n_urgent,  "urgent"),
+    ]
+    cols = st.columns(6)
+    for col, (label, count, key) in zip(cols, metrics):
+        with col:
+            is_active = dash_filter == key
+            tile_bg   = "#f0f4ff" if is_active else "#f8fafc"
+            tile_bdr  = "#2563eb" if is_active else "#e2e8f0"
+            st.markdown(
+                f"<div style='background:{tile_bg};border:1px solid {tile_bdr};"
+                f"border-radius:8px;padding:12px 16px;text-align:center;margin-bottom:4px;'>"
+                f"<div style='font-size:26px;font-weight:700;color:#0f172a;'>{count}</div>"
+                f"<div style='font-size:11px;color:#64748b;font-weight:500;'>{label}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            btn_label = "▲ Hide" if is_active else "View all"
+            if st.button(btn_label, key=f"df_{key}", use_container_width=True):
+                st.session_state.dash_filter = None if is_active else key
+                st.rerun()
 
-    st.divider()
+    # ── Pop-out list panel ────────────────────────────────────────
+    if dash_filter:
+        if dash_filter == "total":
+            filtered = list(active)
+            heading  = "All Active Jobs"
+        elif dash_filter == "overdue":
+            filtered = [j for j in active if _is_overdue(j)]
+            heading  = "🔴 Overdue Jobs"
+        elif dash_filter == "urgent":
+            filtered = [j for j in active if effective_priority(j) == "Urgent" and not _is_overdue(j)]
+            heading  = "⚡ Urgent Jobs"
+        else:
+            filtered = [j for j in active if j["status"] == dash_filter]
+            heading  = f"{dash_filter} Jobs"
 
+        filtered.sort(key=lambda j: (-PRIORITY_RANK[effective_priority(j)], j.get("dueDate") or "9999"))
+
+        st.markdown(f"<br>", unsafe_allow_html=True)
+        st.markdown(f"##### {heading} &nbsp; `{len(filtered)}`")
+        if not filtered:
+            st.info("No jobs in this category.")
+        else:
+            fcols = st.columns(3)
+            for idx, j in enumerate(filtered):
+                with fcols[idx % 3]:
+                    render_active_card(j, "df")
+
+        st.divider()
+
+    # ── Two-column layout: Needs Attention + By Assignee ──────────
     da_col, ab_col = st.columns([3, 2])
 
-    # ── Needs Attention (features 1 + 2) ──────────────────────────
+    # ── Needs Attention ───────────────────────────────────────────
     with da_col:
         st.markdown("#### 🔴 Needs Attention")
         st.caption("Overdue and urgent jobs across all locations")
@@ -479,8 +662,7 @@ def render_dashboard():
         ]
 
         def _attn_sort(j):
-            # overdue first, then by how far past due, then by effective priority
-            ov = _is_overdue(j)
+            ov        = _is_overdue(j)
             days_past = (date.today() - date.fromisoformat(j["dueDate"])).days if ov and j.get("dueDate") else 0
             return (0 if ov else 1, -days_past, -PRIORITY_RANK[effective_priority(j)])
 
@@ -493,10 +675,10 @@ def render_dashboard():
                 with st.container(border=True):
                     if _is_overdue(j):
                         st.markdown(
-                            '<div style="background:#ef4444;height:3px;margin:-4px -8px 6px;border-radius:1px 1px 0 0;"></div>',
+                            '<div style="background:#ef4444;height:3px;margin:-4px -8px 6px;'
+                            'border-radius:1px 1px 0 0;"></div>',
                             unsafe_allow_html=True,
                         )
-                    # Clickable title (same CSS targets this as with kanban cards)
                     if st.button(j["title"], key=f"dash_open_{j['id']}", use_container_width=True):
                         st.session_state.dlg_job_id = j["id"]
                         st.session_state.dlg_open   = True
@@ -504,10 +686,10 @@ def render_dashboard():
 
                     if _is_overdue(j):
                         days_over = (date.today() - date.fromisoformat(j["dueDate"])).days
-                        timing = f"🔴 Overdue {days_over}d"
+                        timing    = f"🔴 Overdue {days_over}d"
                     elif j.get("dueDate"):
                         try:
-                            dl = (date.fromisoformat(j["dueDate"]) - date.today()).days
+                            dl     = (date.fromisoformat(j["dueDate"]) - date.today()).days
                             timing = "Due today" if dl == 0 else f"Due in {dl}d"
                         except ValueError:
                             timing = ""
@@ -529,55 +711,54 @@ def render_dashboard():
                         unsafe_allow_html=True,
                     )
 
-    # ── By Assignee + By Location ──────────────────────────────────
+    # ── By Assignee (contacts-based, each card clickable) ─────────
     with ab_col:
         st.markdown("#### 👤 By Assignee")
 
-        assignee_map: dict = {}
-        for j in active:
-            name = j.get("assignedName") or "Unassigned"
-            assignee_map.setdefault(name, []).append(j)
+        contacts = st.session_state.get("contacts", list(DEFAULT_CONTACTS))
+        for contact in contacts:
+            cname   = contact["name"]
+            c_email = contact.get("email", "")
+            c_jobs  = [
+                j for j in active
+                if cname in job_assignees(j)
+                or (c_email and c_email in {
+                    e.strip() for e in j.get("assignedEmail", "").split(",") if e.strip()
+                })
+            ]
+            ov   = sum(1 for j in c_jobs if _is_overdue(j))
+            ug   = sum(1 for j in c_jobs if effective_priority(j) == "Urgent" and not _is_overdue(j))
+            pend = sum(1 for j in c_jobs if j["status"] == "Pending")
+            inp  = sum(1 for j in c_jobs if j["status"] == "In Progress")
 
-        for name, jobs in sorted(assignee_map.items(), key=lambda x: -len(x[1])):
-            ov   = sum(1 for j in jobs if _is_overdue(j))
-            ug   = sum(1 for j in jobs if effective_priority(j) == "Urgent" and not _is_overdue(j))
-            pend = sum(1 for j in jobs if j["status"] == "Pending")
-            inp  = sum(1 for j in jobs if j["status"] == "In Progress")
             with st.container(border=True):
-                ac1, ac2 = st.columns([3, 1])
-                with ac1:
-                    st.markdown(f"**{name}**")
+                nc1, nc2 = st.columns([3, 1])
+                with nc1:
+                    if st.button(
+                        f"👤  {cname}",
+                        key=f"asgn_btn_{contact['id']}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.modal_assignee_name = cname
+                        st.session_state.assignee_modal_open = True
+                        st.rerun()
                     flags = []
                     if ov: flags.append(f"🔴 {ov} overdue")
                     if ug: flags.append(f"⚡ {ug} urgent")
                     if flags:
                         st.caption("  ·  ".join(flags))
-                with ac2:
+                with nc2:
                     st.markdown(
-                        f"<p style='font-size:12px;text-align:right;margin:0;'>"
-                        f"<b>{len(jobs)}</b> jobs<br>"
+                        f"<p style='font-size:12px;text-align:right;margin:0;padding-top:4px;'>"
+                        f"<b>{len(c_jobs)}</b> jobs<br>"
                         f"<span style='color:#94a3b8;font-size:11px;'>{pend}P · {inp}IP</span></p>",
                         unsafe_allow_html=True,
                     )
 
-        st.divider()
-        st.markdown("#### 📍 By Location")
-        for loc in st.session_state.tabs_list:
-            loc_jobs = [j for j in active if j["location"] == loc]
-            if not loc_jobs:
-                continue
-            pend_n = sum(1 for j in loc_jobs if j["status"] == "Pending")
-            inp_n  = sum(1 for j in loc_jobs if j["status"] == "In Progress")
-            ov_n   = sum(1 for j in loc_jobs if _is_overdue(j))
-            lc1, lc2, lc3 = st.columns([3, 3, 1])
-            with lc1: st.markdown(f"**{loc}**")
-            with lc2: st.caption(f"{pend_n} pending · {inp_n} in progress")
-            with lc3:
-                if ov_n:
-                    st.markdown(
-                        f"<span style='color:#ef4444;font-size:11px;font-weight:600;'>🔴 {ov_n}</span>",
-                        unsafe_allow_html=True,
-                    )
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("+ Add Contact", key="dash_add_contact", use_container_width=True):
+            st.session_state.add_contact_open = True
+            st.rerun()
 
 # ── Dialog ────────────────────────────────────────────────────────────────────
 
@@ -595,88 +776,7 @@ def job_dialog():
     title       = st.text_input("Title *", value=job["title"] if job else "")
     description = st.text_area("Description", value=job.get("description", "") if job else "", height=70)
 
-    PRIORITIES = ["Low", "Medium", "High", "Urgent"]
-    STATUSES   = ["Pending", "In Progress", "Completed"]
-
-    c1, c2 = st.columns(2)
-    with c1:
-        cur_p    = job["priority"] if job else "Medium"
-        priority = st.selectbox("Priority", PRIORITIES, index=PRIORITIES.index(cur_p))
-    with c2:
-        cur_s  = job["status"] if job and job["status"] in STATUSES else "Pending"
-        status = st.selectbox("Status", STATUSES, index=STATUSES.index(cur_s))
-
-    all_tabs = st.session_state.tabs_list
-    if not job:
-        default_loc = st.session_state.get("dlg_location", all_tabs[0])
-        loc_idx     = all_tabs.index(default_loc) if default_loc in all_tabs else 0
-    else:
-        cur_loc  = job["location"] if job["location"] in all_tabs else all_tabs[0]
-        loc_idx  = all_tabs.index(cur_loc)
-    location = st.selectbox("Location", all_tabs, index=loc_idx)
-
-    c3, c4 = st.columns(2)
-    with c3:
-        try:
-            due_val = date.fromisoformat(job["dueDate"]) if job and job.get("dueDate") else None
-        except ValueError:
-            due_val = None
-        due_date = st.date_input("Due Date", value=due_val)
-    with c4:
-        assigned_name = st.text_input("Assigned Name", value=job.get("assignedName", "") if job else "")
-
-    st.markdown("<p style='font-size:14px;font-weight:500;margin-bottom:4px;'>Assigned Emails</p>", unsafe_allow_html=True)
-
-    existing_emails = [e.strip() for e in (job.get("assignedEmail", "") if job else "").split(",") if e.strip()]
-    known_selected  = [e for e in existing_emails if e in KNOWN_EMAILS]
-    custom_existing = ", ".join([e for e in existing_emails if e not in KNOWN_EMAILS])
-
-    selected_known = st.multiselect(
-        "Known contacts",
-        options=KNOWN_EMAILS,
-        default=known_selected,
-        label_visibility="collapsed",
-        placeholder="Select from known contacts...",
-    )
-    custom_email = st.text_input(
-        "Other email(s)",
-        value=custom_existing,
-        placeholder="Other addresses, comma-separated",
-        label_visibility="collapsed",
-    )
-    all_custom     = [e.strip() for e in custom_email.split(",") if e.strip()]
-    assigned_email = ", ".join(selected_known + all_custom)
-
-    # ── Subtasks ──────────────────────────────────────────────────
-    n_done  = sum(1 for s in st.session_state.dlg_subtasks if s.get("done"))
-    n_total = len(st.session_state.dlg_subtasks)
-    sub_label = f"✅ Subtasks ({n_done}/{n_total})" if n_total else "✅ Subtasks"
-    with st.expander(sub_label, expanded=bool(n_total)):
-        for sub in list(st.session_state.dlg_subtasks):
-            sc1, sc2 = st.columns([10, 1])
-            with sc1:
-                st.checkbox(sub["text"], value=sub.get("done", False), key=f"sub_{sub['id']}")
-            with sc2:
-                if st.button("×", key=f"del_sub_{sub['id']}", help="Remove subtask"):
-                    st.session_state.dlg_subtasks = [
-                        s for s in st.session_state.dlg_subtasks if s["id"] != sub["id"]
-                    ]
-                    st.rerun()
-
-        na1, na2 = st.columns([5, 1])
-        with na1:
-            new_sub_text = st.text_input(
-                "New subtask", placeholder="Add a subtask…",
-                label_visibility="collapsed", key="dlg_new_sub_text",
-            )
-        with na2:
-            if st.button("+ Add", key="dlg_add_sub_btn", use_container_width=True):
-                t = (st.session_state.get("dlg_new_sub_text") or "").strip()
-                if t:
-                    st.session_state.dlg_subtasks.append({"id": gen_id(), "text": t, "done": False})
-                    st.rerun()
-
-    # ── Comments (always visible) ─────────────────────────────────
+    # ── Comments (always visible, right under Description) ────────
     st.markdown("<p style='font-size:14px;font-weight:500;margin:8px 0 4px;'>💬 Comments</p>", unsafe_allow_html=True)
     existing_comments = sorted(
         job.get("comments", []) if job else [],
@@ -711,6 +811,87 @@ def job_dialog():
                       label_visibility="collapsed", key="dlg_comm_text")
     st.caption("Saved when you click Save below.")
 
+    PRIORITIES = ["Low", "Medium", "High", "Urgent"]
+    STATUSES   = ["Pending", "In Progress", "Completed"]
+
+    c1, c2 = st.columns(2)
+    with c1:
+        cur_p    = job["priority"] if job else "Medium"
+        priority = st.selectbox("Priority", PRIORITIES, index=PRIORITIES.index(cur_p))
+    with c2:
+        cur_s  = job["status"] if job and job["status"] in STATUSES else "Pending"
+        status = st.selectbox("Status", STATUSES, index=STATUSES.index(cur_s))
+
+    all_tabs = st.session_state.tabs_list
+    if not job:
+        default_loc = st.session_state.get("dlg_location", all_tabs[0])
+        loc_idx     = all_tabs.index(default_loc) if default_loc in all_tabs else 0
+    else:
+        cur_loc  = job["location"] if job["location"] in all_tabs else all_tabs[0]
+        loc_idx  = all_tabs.index(cur_loc)
+    location = st.selectbox("Location", all_tabs, index=loc_idx)
+
+    c3, c4 = st.columns(2)
+    with c3:
+        try:
+            due_val = date.fromisoformat(job["dueDate"]) if job and job.get("dueDate") else None
+        except ValueError:
+            due_val = None
+        due_date = st.date_input("Due Date", value=due_val)
+    with c4:
+        # ── Contacts multiselect for assignment ──────────────────────
+        contacts    = st.session_state.get("contacts", list(DEFAULT_CONTACTS))
+        contact_map = {c["id"]: c for c in contacts}
+
+        # Pre-select contacts that match existing job assignments (by email, then name)
+        if job:
+            existing_emails = {e.strip() for e in job.get("assignedEmail", "").split(",") if e.strip()}
+            existing_names  = set(job_assignees(job))
+            preselected_ids = [
+                c["id"] for c in contacts
+                if (c.get("email") and c["email"] in existing_emails) or c["name"] in existing_names
+            ]
+        else:
+            preselected_ids = []
+
+        selected_ids = st.multiselect(
+            "Assigned To",
+            options=[c["id"] for c in contacts],
+            default=preselected_ids,
+            format_func=lambda cid: contact_map[cid]["name"],
+            placeholder="Select team members…",
+        )
+        selected_contacts = [contact_map[cid] for cid in selected_ids]
+
+    # ── Subtasks ──────────────────────────────────────────────────
+    n_done  = sum(1 for s in st.session_state.dlg_subtasks if s.get("done"))
+    n_total = len(st.session_state.dlg_subtasks)
+    sub_label = f"✅ Subtasks ({n_done}/{n_total})" if n_total else "✅ Subtasks"
+    with st.expander(sub_label, expanded=bool(n_total)):
+        for sub in list(st.session_state.dlg_subtasks):
+            sc1, sc2 = st.columns([10, 1])
+            with sc1:
+                st.checkbox(sub["text"], value=sub.get("done", False), key=f"sub_{sub['id']}")
+            with sc2:
+                if st.button("×", key=f"del_sub_{sub['id']}", help="Remove subtask"):
+                    st.session_state.dlg_subtasks = [
+                        s for s in st.session_state.dlg_subtasks if s["id"] != sub["id"]
+                    ]
+                    st.rerun()
+
+        na1, na2 = st.columns([5, 1])
+        with na1:
+            new_sub_text = st.text_input(
+                "New subtask", placeholder="Add a subtask…",
+                label_visibility="collapsed", key="dlg_new_sub_text",
+            )
+        with na2:
+            if st.button("+ Add", key="dlg_add_sub_btn", use_container_width=True):
+                t = (st.session_state.get("dlg_new_sub_text") or "").strip()
+                if t:
+                    st.session_state.dlg_subtasks.append({"id": gen_id(), "text": t, "done": False})
+                    st.rerun()
+
     # ── Save / Cancel ─────────────────────────────────────────────
     sc, cc = st.columns(2)
     with sc:
@@ -739,6 +920,9 @@ def job_dialog():
                 "author": (st.session_state.get("dlg_comm_author") or "Anonymous").strip(),
                 "ts":     now_ms(),
             })
+
+        assigned_name  = ", ".join(c["name"] for c in selected_contacts)
+        assigned_email = ", ".join(c["email"] for c in selected_contacts if c.get("email"))
 
         upsert_job(
             {
@@ -874,30 +1058,16 @@ def render_archived_card(job: dict, lk: str):
             st.caption("  ·  ".join(meta))
 
 
-def render_kanban(location: str, view: str, search: str,
-                  filter_priority: str, filter_status: str, filter_assignee: str):
-    lk = location.replace(" ", "_").lower()
-    q  = search.strip().lower()
-
-    def matches(j):
-        return (
-            (not q or q in j["title"].lower() or q in (j.get("assignedName") or "").lower()) and
-            (filter_priority == "All" or j["priority"] == filter_priority) and
-            (filter_status   == "All" or j["status"]   == filter_status) and
-            (filter_assignee == "All" or (j.get("assignedName") or "") == filter_assignee)
-        )
-
+def render_kanban(location: str, view: str):
+    lk       = location.replace(" ", "_").lower()
     tab_jobs = [j for j in st.session_state.jobs if j["location"] == location]
 
     def sort_key(j):
-        # Primary: effective priority descending (Urgent=3 first)
-        # Secondary: due date ascending (soonest first), no due date last
-        # Tertiary: creation time ascending
         due = j.get("dueDate") or "9999-99-99"
         return (-PRIORITY_RANK[effective_priority(j)], due, j.get("createdAt", 0))
 
     if view == "Active":
-        pool = [j for j in tab_jobs if j["status"] != "Archived" and matches(j)]
+        pool = [j for j in tab_jobs if j["status"] != "Archived"]
         cols = st.columns(3)
         for i, col_name in enumerate(["Pending", "In Progress", "Completed"]):
             group = sorted([j for j in pool if j["status"] == col_name], key=sort_key)
@@ -908,7 +1078,7 @@ def render_kanban(location: str, view: str, search: str,
                 for job in group:
                     render_active_card(job, lk)
     else:
-        pool = [j for j in tab_jobs if j["status"] == "Archived" and matches(j)]
+        pool = [j for j in tab_jobs if j["status"] == "Archived"]
         st.markdown(f"#### Archived &nbsp; `{len(pool)}`")
         if not pool:
             st.caption("No archived jobs")
@@ -921,15 +1091,20 @@ def render_kanban(location: str, view: str, search: str,
 # ── Session state init ────────────────────────────────────────────────────────
 
 if "initialized" not in st.session_state:
-    jobs, tabs, archived_tabs = load_data()
+    jobs, tabs, archived_tabs, contacts = load_data()
     st.session_state.update({
-        "jobs":          jobs,
-        "tabs_list":     tabs,
-        "archived_tabs": archived_tabs,
-        "dlg_open":      False,
-        "dlg_job_id":    None,
-        "dlg_location":  tabs[0] if tabs else DEFAULT_TABS[0],
-        "initialized":   True,
+        "jobs":                  jobs,
+        "tabs_list":             tabs,
+        "archived_tabs":         archived_tabs,
+        "contacts":              contacts,
+        "dlg_open":              False,
+        "dlg_job_id":            None,
+        "dlg_location":          tabs[0] if tabs else DEFAULT_TABS[0],
+        "assignee_modal_open":   False,
+        "modal_assignee_name":   "",
+        "add_contact_open":      False,
+        "dash_filter":           None,
+        "initialized":           True,
     })
 
 auto_archive()
@@ -1174,31 +1349,14 @@ div[data-testid="stVerticalBlockBorderWrapper"]
 
 # ── Header ────────────────────────────────────────────────────────────────────
 
-hc1, hc2, hc3, hc4, hc5 = st.columns([2, 2.5, 1.2, 1.2, 1.5])
-with hc1:
-    st.markdown("""
-    <div class="app-header">
-        <div>
-            <div class="app-title">Jobs Manager</div>
-            <div class="app-subtitle">NZL 49er Programme</div>
-        </div>
+st.markdown("""
+<div class="app-header">
+    <div>
+        <div class="app-title">Jobs Manager</div>
+        <div class="app-subtitle">NZL 49er Programme</div>
     </div>
-    """, unsafe_allow_html=True)
-with hc2:
-    search = st.text_input("Search", placeholder="Search jobs or assignees", label_visibility="collapsed")
-with hc3:
-    filter_priority = st.selectbox(
-        "Priority", ["All", "Low", "Medium", "High", "Urgent"], label_visibility="collapsed"
-    )
-with hc4:
-    filter_status = st.selectbox(
-        "Status", ["All", "Pending", "In Progress", "Completed"], label_visibility="collapsed"
-    )
-with hc5:
-    all_names = sorted({j["assignedName"] for j in st.session_state.jobs if j.get("assignedName")})
-    filter_assignee = st.selectbox(
-        "Assignee", ["All"] + all_names, label_visibility="collapsed"
-    )
+</div>
+""", unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -1297,7 +1455,7 @@ for i, tab_ctx in enumerate(loc_tabs[1:-2]):
                 )
 
         st.divider()
-        render_kanban(loc, view, search, filter_priority, filter_status, filter_assignee)
+        render_kanban(loc, view)
 
 # ── New Tab ───────────────────────────────────────────────────────────────────
 
@@ -1342,7 +1500,13 @@ with loc_tabs[-1]:
                     st.rerun()
             st.divider()
 
-# ── Open dialog if flagged ────────────────────────────────────────────────────
+# ── Open dialogs if flagged ───────────────────────────────────────────────────
 
 if st.session_state.get("dlg_open"):
     job_dialog()
+
+if st.session_state.get("add_contact_open"):
+    add_contact_dialog()
+
+if st.session_state.get("assignee_modal_open"):
+    assignee_jobs_modal()
