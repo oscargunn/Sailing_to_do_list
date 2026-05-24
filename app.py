@@ -528,21 +528,30 @@ def add_contact_dialog():
 
 @st.dialog("Team Member", width="large")
 def assignee_jobs_modal():
-    name    = st.session_state.get("modal_assignee_name", "")
-    contact = next((c for c in st.session_state.contacts if c["name"] == name), None)
+    name     = st.session_state.get("modal_assignee_name", "")
+    contacts = st.session_state.get("contacts", list(DEFAULT_CONTACTS))
+    is_unassigned = (name == "__unassigned__")
 
-    st.markdown(f"### 👤 {name}")
-    if contact and contact.get("email"):
-        st.caption(contact["email"])
+    if is_unassigned:
+        contact = None
+        st.markdown("### 👤 Unassigned")
+        st.caption("Jobs with no assigned team member")
+    else:
+        contact = next((c for c in contacts if c["name"] == name), None)
+        st.markdown(f"### 👤 {name}")
+        if contact and contact.get("email"):
+            st.caption(contact["email"])
 
-    # Collect jobs for this contact (match by email first, then by name)
+    # Collect jobs for this person/unassigned bucket
     all_active = [j for j in st.session_state.jobs if j["status"] != "Archived"]
-    if contact and contact.get("email"):
+    if is_unassigned:
+        jobs = [j for j in all_active if not job_assignees(j)]
+    elif contact and contact.get("email"):
         email = contact["email"]
         jobs = [
             j for j in all_active
             if name in job_assignees(j)
-            or email in {e.strip() for e in j.get("assignedEmail","").split(",") if e.strip()}
+            or email in {e.strip() for e in j.get("assignedEmail", "").split(",") if e.strip()}
         ]
     else:
         jobs = [j for j in all_active if name in job_assignees(j)]
@@ -551,7 +560,7 @@ def assignee_jobs_modal():
 
     st.divider()
     if not jobs:
-        st.info("No active jobs assigned to this person.")
+        st.info("No active jobs here." if is_unassigned else "No active jobs assigned to this person.")
     else:
         st.caption(f"{len(jobs)} active job{'s' if len(jobs) != 1 else ''}")
         cols = st.columns(3)
@@ -560,14 +569,14 @@ def assignee_jobs_modal():
                 render_modal_card(j, "asgn")
 
     st.divider()
-    if contact:
+    if contact and not is_unassigned:
         dc1, dc2 = st.columns([4, 1])
         with dc1:
             st.caption("Remove this contact from the team list (existing job assignments are kept).")
         with dc2:
             if st.button("Remove", key="del_contact_modal", use_container_width=True):
                 st.session_state.contacts = [
-                    c for c in st.session_state.contacts if c["name"] != name
+                    c for c in st.session_state.get("contacts", []) if c["name"] != name
                 ]
                 save_data()
                 st.session_state.assignee_modal_open = False
@@ -756,6 +765,39 @@ def render_dashboard():
                         f"<p style='font-size:12px;text-align:right;margin:0;padding-top:4px;'>"
                         f"<b>{len(c_jobs)}</b> jobs<br>"
                         f"<span style='color:#94a3b8;font-size:11px;'>{pend}P · {inp}IP</span></p>",
+                        unsafe_allow_html=True,
+                    )
+
+        # ── Unassigned card ───────────────────────────────────────────
+        unassigned_jobs = [j for j in active if not job_assignees(j)]
+        if unassigned_jobs:
+            ov_u   = sum(1 for j in unassigned_jobs if _is_overdue(j))
+            ug_u   = sum(1 for j in unassigned_jobs if effective_priority(j) == "Urgent" and not _is_overdue(j))
+            pend_u = sum(1 for j in unassigned_jobs if j["status"] == "Pending")
+            inp_u  = sum(1 for j in unassigned_jobs if j["status"] == "In Progress")
+            with st.container(border=True):
+                nc1, nc2 = st.columns([3, 1])
+                with nc1:
+                    if st.button(
+                        "👤  Unassigned",
+                        key="asgn_btn_unassigned",
+                        use_container_width=True,
+                    ):
+                        st.session_state.dlg_open            = False
+                        st.session_state.add_contact_open    = False
+                        st.session_state.modal_assignee_name = "__unassigned__"
+                        st.session_state.assignee_modal_open = True
+                        st.rerun()
+                    flags_u = []
+                    if ov_u: flags_u.append(f"🔴 {ov_u} overdue")
+                    if ug_u: flags_u.append(f"⚡ {ug_u} urgent")
+                    if flags_u:
+                        st.caption("  ·  ".join(flags_u))
+                with nc2:
+                    st.markdown(
+                        f"<p style='font-size:12px;text-align:right;margin:0;padding-top:4px;'>"
+                        f"<b>{len(unassigned_jobs)}</b> jobs<br>"
+                        f"<span style='color:#94a3b8;font-size:11px;'>{pend_u}P · {inp_u}IP</span></p>",
                         unsafe_allow_html=True,
                     )
 
@@ -1112,6 +1154,18 @@ if "initialized" not in st.session_state:
         "dash_filter":           None,
         "initialized":           True,
     })
+
+# Guard: patch any keys that may be absent in sessions created before these features
+if "contacts"             not in st.session_state:
+    st.session_state.contacts             = list(DEFAULT_CONTACTS)
+if "assignee_modal_open"  not in st.session_state:
+    st.session_state.assignee_modal_open  = False
+if "modal_assignee_name"  not in st.session_state:
+    st.session_state.modal_assignee_name  = ""
+if "add_contact_open"     not in st.session_state:
+    st.session_state.add_contact_open     = False
+if "dash_filter"          not in st.session_state:
+    st.session_state.dash_filter          = None
 
 auto_archive()
 send_due_reminders()
