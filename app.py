@@ -491,46 +491,43 @@ def render_dashboard():
         else:
             for j in needs:
                 with st.container(border=True):
-                    # Red top bar for overdue
                     if _is_overdue(j):
                         st.markdown(
                             '<div style="background:#ef4444;height:3px;margin:-4px -8px 6px;border-radius:1px 1px 0 0;"></div>',
                             unsafe_allow_html=True,
                         )
-                    c1, c2 = st.columns([9, 1])
-                    with c1:
-                        if _is_overdue(j):
-                            days_over = (date.today() - date.fromisoformat(j["dueDate"])).days
-                            timing = f"🔴 Overdue {days_over}d"
-                        elif j.get("dueDate"):
-                            try:
-                                dl = (date.fromisoformat(j["dueDate"]) - date.today()).days
-                                timing = "Due today" if dl == 0 else f"Due in {dl}d"
-                            except ValueError:
-                                timing = ""
-                        else:
-                            timing = ""
+                    # Clickable title (same CSS targets this as with kanban cards)
+                    if st.button(j["title"], key=f"dash_open_{j['id']}", use_container_width=True):
+                        st.session_state.dlg_job_id = j["id"]
+                        st.session_state.dlg_open   = True
+                        st.rerun()
 
-                        eff_p = effective_priority(j)
-                        st.markdown(
-                            f"<p style='margin:0;font-size:13px;font-weight:600;line-height:1.3;'>{j['title']}</p>"
-                            f"<p style='margin:1px 0;font-size:11px;color:#94a3b8;'>"
-                            f"📍 {j['location']}"
-                            + (f"  ·  👤 {j['assignedName']}" if j.get("assignedName") else "")
-                            + (f"  ·  {timing}" if timing else "")
-                            + "</p>",
-                            unsafe_allow_html=True,
-                        )
-                        st.markdown(
-                            badge(eff_p, PRIORITY_STYLES[eff_p]) + " " +
-                            badge(j["status"], STATUS_STYLES[j["status"]]),
-                            unsafe_allow_html=True,
-                        )
-                    with c2:
-                        if st.button("✏", key=f"dash_e_{j['id']}", help="Edit job"):
-                            st.session_state.dlg_job_id = j["id"]
-                            st.session_state.dlg_open   = True
-                            st.rerun()
+                    if _is_overdue(j):
+                        days_over = (date.today() - date.fromisoformat(j["dueDate"])).days
+                        timing = f"🔴 Overdue {days_over}d"
+                    elif j.get("dueDate"):
+                        try:
+                            dl = (date.fromisoformat(j["dueDate"]) - date.today()).days
+                            timing = "Due today" if dl == 0 else f"Due in {dl}d"
+                        except ValueError:
+                            timing = ""
+                    else:
+                        timing = ""
+
+                    eff_p = effective_priority(j)
+                    st.markdown(
+                        f"<p style='margin:1px 0;font-size:11px;color:#94a3b8;'>"
+                        f"📍 {j['location']}"
+                        + (f"  ·  👤 {j['assignedName']}" if j.get("assignedName") else "")
+                        + (f"  ·  {timing}" if timing else "")
+                        + "</p>",
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        badge(eff_p, PRIORITY_STYLES[eff_p]) + " " +
+                        badge(j["status"], STATUS_STYLES[j["status"]]),
+                        unsafe_allow_html=True,
+                    )
 
     # ── By Assignee + By Location ──────────────────────────────────
     with ab_col:
@@ -649,7 +646,6 @@ def job_dialog():
     )
     all_custom     = [e.strip() for e in custom_email.split(",") if e.strip()]
     assigned_email = ", ".join(selected_known + all_custom)
-    notes = st.text_area("Notes", value=job.get("notes", "") if job else "", height=70)
 
     # ── Subtasks ──────────────────────────────────────────────────
     n_done  = sum(1 for s in st.session_state.dlg_subtasks if s.get("done"))
@@ -680,32 +676,40 @@ def job_dialog():
                     st.session_state.dlg_subtasks.append({"id": gen_id(), "text": t, "done": False})
                     st.rerun()
 
-    # ── Comments ──────────────────────────────────────────────────
+    # ── Comments (always visible) ─────────────────────────────────
+    st.markdown("<p style='font-size:14px;font-weight:500;margin:8px 0 4px;'>💬 Comments</p>", unsafe_allow_html=True)
     existing_comments = sorted(
         job.get("comments", []) if job else [],
         key=lambda c: c.get("ts", 0), reverse=True,
     )
-    with st.expander(f"💬 Comments ({len(existing_comments)})", expanded=False):
-        if existing_comments:
-            for c in existing_comments:
-                ts_str = datetime.fromtimestamp(c["ts"] / 1000).strftime("%d %b, %H:%M") if c.get("ts") else ""
-                st.markdown(
-                    f"<p style='margin:0;font-size:12px;font-weight:600;'>{c.get('author','Anonymous')}"
-                    f"<span style='font-weight:400;color:#94a3b8;'> · {ts_str}</span></p>"
-                    f"<p style='margin:0 0 6px;font-size:13px;'>{c.get('text','')}</p>",
-                    unsafe_allow_html=True,
-                )
-        else:
-            st.caption("No comments yet.")
+    if existing_comments:
+        rows_html = ""
+        for c in existing_comments:
+            ts_str = datetime.fromtimestamp(c["ts"] / 1000).strftime("%d %b, %H:%M") if c.get("ts") else ""
+            rows_html += (
+                f"<div style='padding:6px 0;border-bottom:1px solid #f1f5f9;'>"
+                f"<p style='margin:0;font-size:12px;font-weight:600;color:#374151;'>"
+                f"{c.get('author','Anonymous')}"
+                f"<span style='font-weight:400;color:#94a3b8;'> · {ts_str}</span></p>"
+                f"<p style='margin:2px 0 0;font-size:13px;color:#374151;'>{c.get('text','')}</p>"
+                f"</div>"
+            )
+        st.markdown(
+            f"<div style='max-height:200px;overflow-y:auto;border:1px solid #e2e8f0;"
+            f"border-radius:6px;padding:4px 10px;margin-bottom:8px;'>{rows_html}</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.caption("No comments yet.")
 
-        comm_c1, comm_c2 = st.columns([2, 3])
-        with comm_c1:
-            st.text_input("Your name", placeholder="Your name",
-                          label_visibility="collapsed", key="dlg_comm_author")
-        with comm_c2:
-            st.text_input("Comment", placeholder="Write a comment…",
-                          label_visibility="collapsed", key="dlg_comm_text")
-        st.caption("Comment is saved when you click Save below.")
+    comm_c1, comm_c2 = st.columns([2, 3])
+    with comm_c1:
+        st.text_input("Your name", placeholder="Your name",
+                      label_visibility="collapsed", key="dlg_comm_author")
+    with comm_c2:
+        st.text_input("Comment", placeholder="Write a comment…",
+                      label_visibility="collapsed", key="dlg_comm_text")
+    st.caption("Saved when you click Save below.")
 
     # ── Save / Cancel ─────────────────────────────────────────────
     sc, cc = st.columns(2)
@@ -742,7 +746,7 @@ def job_dialog():
                 "status": status, "location": location,
                 "dueDate": str(due_date) if due_date else "",
                 "assignedName": assigned_name, "assignedEmail": assigned_email,
-                "notes": notes, "subtasks": final_subtasks, "comments": final_comments,
+                "subtasks": final_subtasks, "comments": final_comments,
             },
             job_id=job_id,
         )
@@ -775,18 +779,12 @@ def render_active_card(job: dict, lk: str):
                 'margin:-4px -8px 6px;border-radius:1px 1px 0 0;"></div>',
                 unsafe_allow_html=True,
             )
-        tc, ec, dc = st.columns([5, 1, 1])
-        with tc:
-            st.markdown(f"<p style='margin:0;font-size:13px;font-weight:600;line-height:1.3;color:#0f172a;'>{job['title']}</p>", unsafe_allow_html=True)
-        with ec:
-            if st.button("✏", key=f"e_{lk}_{job['id']}", help="Edit", use_container_width=True):
-                st.session_state.dlg_job_id = job["id"]
-                st.session_state.dlg_open   = True
-                st.rerun()
-        with dc:
-            if st.button("🗑", key=f"d_{lk}_{job['id']}", help="Delete", use_container_width=True):
-                remove_job(job["id"])
-                st.rerun()
+
+        # Title — full-width button styled as text (CSS targets this direct child)
+        if st.button(job["title"], key=f"open_{lk}_{job['id']}", use_container_width=True):
+            st.session_state.dlg_job_id = job["id"]
+            st.session_state.dlg_open   = True
+            st.rerun()
 
         meta = []
         if job.get("dueDate"):
@@ -810,29 +808,45 @@ def render_active_card(job: dict, lk: str):
                 h = int(ms_left / 3_600_000)
                 m = int((ms_left % 3_600_000) / 60_000)
                 meta.append(f"Archives in {h}h {m}m")
+        # Comment count badge
+        n_comments = len(job.get("comments", []))
+        if n_comments:
+            meta.append(f"💬 {n_comments}")
 
-        eff_p      = effective_priority(job)
-        meta_html  = f"<p style='font-size:11px;color:#94a3b8;margin:1px 0 0;'>{'  ·  '.join(meta)}</p>" if meta else ""
-        notes_html = f"<p style='font-size:11px;color:#374151;margin:1px 0 0;'>{job['notes']}</p>" if job.get("notes") else ""
-        desc_html  = f"<p style='font-size:11px;color:#374151;margin:1px 0 0;'>{job['description']}</p>" if job.get("description") else ""
+        eff_p     = effective_priority(job)
+        meta_html = f"<p style='font-size:11px;color:#94a3b8;margin:1px 0 0;'>{'  ·  '.join(meta)}</p>" if meta else ""
+        desc_html = f"<p style='font-size:11px;color:#374151;margin:1px 0 0;'>{job['description']}</p>" if job.get("description") else ""
 
         st.markdown(
-            badge(eff_p,         PRIORITY_STYLES[eff_p]) + " " +
+            badge(eff_p, PRIORITY_STYLES[eff_p]) + " " +
             badge(job["status"], STATUS_STYLES[job["status"]]) +
-            meta_html + notes_html + desc_html,
+            meta_html + desc_html,
             unsafe_allow_html=True,
         )
 
+        # Status selector + delete in bottom row
         if job["status"] != "Completed":
-            opts = ["Pending", "In Progress", "Completed"]
-            cur  = opts.index(job["status"]) if job["status"] in opts else 0
-            sel  = st.selectbox(
-                "Status", opts, index=cur,
-                key=f"s_{lk}_{job['id']}", label_visibility="collapsed",
-            )
-            if sel != job["status"]:
-                set_status(job["id"], sel)
-                st.rerun()
+            bc1, bc2 = st.columns([4, 1])
+            with bc1:
+                opts = ["Pending", "In Progress", "Completed"]
+                cur  = opts.index(job["status"]) if job["status"] in opts else 0
+                sel  = st.selectbox(
+                    "Status", opts, index=cur,
+                    key=f"s_{lk}_{job['id']}", label_visibility="collapsed",
+                )
+                if sel != job["status"]:
+                    set_status(job["id"], sel)
+                    st.rerun()
+            with bc2:
+                if st.button("🗑", key=f"d_{lk}_{job['id']}", help="Delete", use_container_width=True):
+                    remove_job(job["id"])
+                    st.rerun()
+        else:
+            _, bc2 = st.columns([5, 1])
+            with bc2:
+                if st.button("🗑", key=f"d_{lk}_{job['id']}", help="Delete", use_container_width=True):
+                    remove_job(job["id"])
+                    st.rerun()
 
 
 def render_archived_card(job: dict, lk: str):
@@ -852,8 +866,9 @@ def render_archived_card(job: dict, lk: str):
         meta = []
         if job.get("assignedName"):
             meta.append(f"Assigned to {job['assignedName']}")
-        if job.get("notes"):
-            meta.append(f"Note: {job['notes']}")
+        n_comments = len(job.get("comments", []))
+        if n_comments:
+            meta.append(f"💬 {n_comments}")
         if meta:
             st.caption("  ·  ".join(meta))
 
@@ -989,6 +1004,39 @@ h4 { font-size: 13px !important; font-weight: 600 !important; color: #475569 !im
 .stRadio label { font-family: 'DM Sans', sans-serif !important; font-size: 13px !important; font-weight: 500 !important; }
 code { font-family: 'DM Mono', monospace !important; font-size: 11px !important; background: #f1f5f9 !important; color: #475569 !important; border-radius: 4px !important; padding: 1px 6px !important; }
 
+/* ── Card title buttons — look like bold text, not a button ───────── */
+div[data-testid="stVerticalBlockBorderWrapper"]
+    > div
+    > [data-testid="stVerticalBlock"]
+    > [data-testid="element-container"]
+    > .stButton
+    > button {
+    background: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 2px 0 3px !important;
+    height: auto !important;
+    min-height: auto !important;
+    text-align: left !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: #0f172a !important;
+    width: 100% !important;
+    justify-content: flex-start !important;
+    letter-spacing: 0 !important;
+    line-height: 1.3 !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"]
+    > div
+    > [data-testid="stVerticalBlock"]
+    > [data-testid="element-container"]
+    > .stButton
+    > button:hover {
+    color: #2563eb !important;
+    background: none !important;
+    text-decoration: underline !important;
+}
+
 /* ── Dark mode (mirrors OS preference) ─────────────────────────────── */
 @media (prefers-color-scheme: dark) {
     /* App background */
@@ -1018,6 +1066,20 @@ code { font-family: 'DM Mono', monospace !important; font-size: 11px !important;
         background-color: #262626 !important;
     }
     div[data-testid="stVerticalBlockBorderWrapper"] > div { background-color: #262626 !important; }
+
+    /* Card title buttons in dark mode */
+    div[data-testid="stVerticalBlockBorderWrapper"]
+        > div
+        > [data-testid="stVerticalBlock"]
+        > [data-testid="element-container"]
+        > .stButton
+        > button { color: #ececec !important; }
+    div[data-testid="stVerticalBlockBorderWrapper"]
+        > div
+        > [data-testid="stVerticalBlock"]
+        > [data-testid="element-container"]
+        > .stButton
+        > button:hover { color: #93c5fd !important; }
 
     /* Tabs */
     .stTabs [data-baseweb="tab-list"] {
