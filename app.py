@@ -11,8 +11,10 @@ from datetime import datetime, date
 try:
     from supabase import create_client
     _SUPABASE_PKG = True
-except ImportError:
+    _SUPABASE_IMPORT_ERROR = ""
+except Exception as _e:          # ImportError OR a broken dependency on import
     _SUPABASE_PKG = False
+    _SUPABASE_IMPORT_ERROR = f"{type(_e).__name__}: {_e}"
 
 st.set_page_config(page_title="Jobs Manager", page_icon=None, layout="wide")
 
@@ -415,9 +417,9 @@ def load_data() -> tuple:
     # ── No Supabase client at all (not configured / package missing) ──
     if sb is None:
         if sb_state == "no_package":
-            msg = "Supabase library not installed — using local file only."
+            msg = f"Supabase library failed to load — using local file only. ({_SUPABASE_IMPORT_ERROR})"
         elif sb_state == "no_secrets":
-            msg = "Supabase not configured — using local file only."
+            msg = "Supabase not configured (no [supabase] secret found) — using local file only."
         else:
             msg = f"Supabase connection failed — using local file only. ({sb_state})"
         if local:
@@ -480,10 +482,10 @@ def save_data():
     sb, sb_state = _get_supabase()
     if sb is None:
         if sb_state == "no_secrets":
-            _set_sync("local", "Not connected to Supabase (no config) — saved on this device only.",
+            _set_sync("local", "Not connected to Supabase (no [supabase] secret) — saved on this device only.",
                       ts if local_ok else st.session_state.get("last_synced"), "local")
         elif sb_state == "no_package":
-            _set_sync("local", "Supabase library missing — saved on this device only.",
+            _set_sync("local", f"Supabase library failed to load — saved on this device only. ({_SUPABASE_IMPORT_ERROR})",
                       ts if local_ok else st.session_state.get("last_synced"), "local")
         else:
             _set_sync("error", f"Supabase unavailable — saved on this device only. ({sb_state})",
