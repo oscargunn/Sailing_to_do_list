@@ -284,18 +284,37 @@ def send_due_reminders():
 
 @st.cache_resource
 def _get_supabase():
+    """Return (client, status). status: 'ok' | 'no_package' | 'no_secrets' | 'error: ...'."""
     if not _SUPABASE_PKG:
-        return None
+        return None, "no_package"
     try:
         cfg = st.secrets["supabase"]
-        return create_client(cfg["url"], cfg["key"])
     except Exception:
-        return None
+        return None, "no_secrets"
+    try:
+        return create_client(cfg["url"], cfg["key"]), "ok"
+    except Exception as e:
+        return None, f"error: {e}"
 
 # ── Data layer ────────────────────────────────────────────────────────────────
 
 def now_ms() -> float:
     return datetime.now().timestamp() * 1000
+
+def fmt_ago(ts) -> str:
+    """Human 'time ago' from a ms timestamp."""
+    if not ts:
+        return ""
+    secs = (now_ms() - ts) / 1000
+    if secs < 60:
+        return "just now"
+    mins = secs / 60
+    if mins < 60:
+        return f"{int(mins)}m ago"
+    hrs = mins / 60
+    if hrs < 24:
+        return f"{int(hrs)}h ago"
+    return f"{int(hrs / 24)}d ago"
 
 def gen_id() -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=10))
@@ -349,62 +368,135 @@ def make_seed() -> list:
         for i, r in enumerate(RAW_SEED)
     ]
 
-def load_data() -> tuple:
-    # 1 — try Supabase (cloud, survives reboots)
-    sb = _get_supabase()
-    if sb:
-        try:
-            result = sb.table("app_state").select("data").eq("id", 1).execute()
-            if result.data:
-                d = result.data[0]["data"]
-                if d.get("jobs"):
-                    return (
-                        d.get("jobs", make_seed()),
-                        d.get("tabs", list(DEFAULT_TABS)),
-                        d.get("archived_tabs", []),
-                        d.get("contacts", list(DEFAULT_CONTACTS)),
-                    )
-        except Exception as e:
-            st.session_state["supabase_load_error"] = f"Supabase load failed: {e}"
+def _set_sync(status: str, message: str, last_synced, source: str):
+    """Record the live sync state so the header badge can show it.
+    status: 'synced' (cloud is current) | 'local' (cloud not reached) | 'error' (cloud failed)."""
+    st.session_state["sb_status"]   = status
+    st.session_state["sb_message"]  = message
+    st.session_state["last_synced"] = last_synced
+    st.session_state["sync_source"] = source
 
-    # 2 — fall back to local JSON
+def _unpack(d: dict) -> tuple:
+    """Turn a stored payload dict into the 4-tuple the app expects."""
+    return (
+        d.get("jobs", make_seed()),
+        d.get("tabs", list(DEFAULT_TABS)),
+        d.get("archived_tabs", []),
+        d.get("contacts", list(DEFAULT_CONTACTS)),
+    )
+
+def _read_local():
+    """Return (payload, error_str). payload is dict or None."""
     if os.path.exists(STORAGE_FILE):
         try:
             with open(STORAGE_FILE) as f:
-                d = json.load(f)
-            return (
-                d.get("jobs", make_seed()),
-                d.get("tabs", list(DEFAULT_TABS)),
-                d.get("archived_tabs", []),
-                d.get("contacts", list(DEFAULT_CONTACTS)),
-            )
-        except Exception:
-            pass
+                return json.load(f), None
+        except Exception as e:
+            return None, str(e)
+    return None, None
 
-    # 3 — first run: return seed data
-    return make_seed(), list(DEFAULT_TABS), [], list(DEFAULT_CONTACTS)
+def _read_supabase(sb):
+    """Return (payload, error_str). payload is dict or None (None = reached but empty)."""
+    try:
+        result = sb.table("app_state").select("data").eq("id", 1).execute()
+        if result.data:
+            d = result.data[0]["data"]
+            if d.get("jobs"):
+                return d, None
+        return None, None
+    except Exception as e:
+        return None, str(e)
+
+def load_data() -> tuple:
+    sb, sb_state = _get_supabase()
+    local, _local_err = _read_local()
+    seed = (make_seed(), list(DEFAULT_TABS), [], list(DEFAULT_CONTACTS))
+
+    # ── No Supabase client at all (not configured / package missing) ──
+    if sb is None:
+        if sb_state == "no_package":
+            msg = "Supabase library not installed — using local file only."
+        elif sb_state == "no_secrets":
+            msg = "Supabase not configured — using local file only."
+        else:
+            msg = f"Supabase connection failed — using local file only. ({sb_state})"
+        if local:
+            _set_sync("local", msg, local.get("last_synced"), "local")
+            return _unpack(local)
+        _set_sync("local", msg, None, "seed")
+        return seed
+
+    # ── Client exists — try to read the cloud copy ──
+    remote, remote_err = _read_supabase(sb)
+    if remote_err:
+        msg = f"Could not read from Supabase — using local file. ({remote_err})"
+        if local:
+            _set_sync("error", msg, local.get("last_synced"), "local")
+            return _unpack(local)
+        _set_sync("error", msg, None, "seed")
+        return seed
+
+    # ── Read succeeded. Compare timestamps to detect drift ──
+    r_ts = (remote or {}).get("last_synced") or 0
+    l_ts = (local  or {}).get("last_synced") or 0
+
+    # Local is strictly newer → a previous cloud save didn't land. Prefer local & re-push.
+    if local and l_ts > r_ts:
+        _set_sync("synced", "Local had newer changes — re-syncing to Supabase…", l_ts, "local")
+        st.session_state["_resync_needed"] = True
+        return _unpack(local)
+
+    if remote:
+        _set_sync("synced", "Synced with Supabase.", r_ts, "supabase")
+        return _unpack(remote)
+
+    # Cloud reachable but empty. Seed it from local if we have one.
+    if local:
+        _set_sync("synced", "Synced with Supabase.", l_ts, "local")
+        st.session_state["_resync_needed"] = True
+        return _unpack(local)
+    _set_sync("synced", "Connected to Supabase (empty) — starting fresh.", None, "seed")
+    return seed
 
 def save_data():
+    ts = now_ms()
     payload = {
         "jobs":          st.session_state.jobs,
         "tabs":          st.session_state.tabs_list,
         "archived_tabs": st.session_state.archived_tabs,
         "contacts":      st.session_state.get("contacts", list(DEFAULT_CONTACTS)),
+        "last_synced":   ts,
     }
-    # 1 — save to Supabase (primary, cloud-persistent)
-    sb = _get_supabase()
-    if sb:
-        try:
-            sb.table("app_state").upsert({"id": 1, "data": payload}).execute()
-        except Exception as e:
-            st.session_state["supabase_save_error"] = f"Supabase save failed: {e}"
 
-    # 2 — also write local JSON as backup / for local dev
+    # 1 — local JSON first (fast, always available)
+    local_ok = True
     try:
         with open(STORAGE_FILE, "w") as f:
             json.dump(payload, f, indent=2)
     except Exception:
-        pass
+        local_ok = False
+
+    # 2 — Supabase (cloud, durable)
+    sb, sb_state = _get_supabase()
+    if sb is None:
+        if sb_state == "no_secrets":
+            _set_sync("local", "Not connected to Supabase (no config) — saved on this device only.",
+                      ts if local_ok else st.session_state.get("last_synced"), "local")
+        elif sb_state == "no_package":
+            _set_sync("local", "Supabase library missing — saved on this device only.",
+                      ts if local_ok else st.session_state.get("last_synced"), "local")
+        else:
+            _set_sync("error", f"Supabase unavailable — saved on this device only. ({sb_state})",
+                      ts if local_ok else st.session_state.get("last_synced"), "local")
+        return
+
+    try:
+        sb.table("app_state").upsert({"id": 1, "data": payload}).execute()
+        _set_sync("synced", "Synced with Supabase.", ts, "supabase")
+    except Exception as e:
+        _set_sync("error",
+                  f"Saved on this device, but the cloud save FAILED — this change is not backed up. ({e})",
+                  ts if local_ok else st.session_state.get("last_synced"), "local")
 
 # ── Mutations ─────────────────────────────────────────────────────────────────
 
@@ -1172,6 +1264,10 @@ if "add_contact_open"     not in st.session_state:
 if "dash_filter"          not in st.session_state:
     st.session_state.dash_filter          = None
 
+# If load_data found local changes newer than the cloud, push them up now.
+if st.session_state.pop("_resync_needed", False):
+    save_data()
+
 auto_archive()
 send_due_reminders()
 
@@ -1181,10 +1277,6 @@ if "email_toast" in st.session_state:
     st.toast(st.session_state.pop("email_toast"))
 if "email_toast_error" in st.session_state:
     st.error(st.session_state.pop("email_toast_error"))
-if "supabase_load_error" in st.session_state:
-    st.warning(st.session_state.pop("supabase_load_error"))
-if "supabase_save_error" in st.session_state:
-    st.warning(st.session_state.pop("supabase_save_error"))
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 
@@ -1251,6 +1343,17 @@ div[data-testid="stVerticalBlockBorderWrapper"] .stSelectbox [data-baseweb="sele
 h4 { font-size: 10px !important; font-weight: 700 !important; color: #94a3b8 !important; text-transform: uppercase !important; letter-spacing: 0.10em !important; margin-bottom: 10px !important; }
 /* Pill badges */
 .badge { border-radius: 20px !important; }
+
+/* Sync status badge (header) */
+.sync-badge {
+    display: inline-flex; align-items: center;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+    padding: 4px 12px; border-radius: 20px; white-space: nowrap;
+    border: 1px solid transparent;
+}
+.sync-badge.sync-ok   { background: #ecfdf5; color: #15803d; border-color: #bbf7d0; }
+.sync-badge.sync-warn { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+.sync-badge.sync-err  { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
 .stCaptionContainer, [data-testid="stCaptionContainer"] { color: #94a3b8 !important; font-size: 12px !important; }
 [data-testid="stToast"] { font-family: 'DM Sans', sans-serif !important; font-size: 13px !important; }
 .stRadio label { font-family: 'DM Sans', sans-serif !important; font-size: 13px !important; font-weight: 500 !important; }
@@ -1418,6 +1521,11 @@ div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"
     .badge-in-progress { background: #431407 !important; color: #fdba74 !important; }
     .badge-completed   { background: #052e16 !important; color: #86efac !important; }
     .badge-archived    { background: #1e293b !important; color: #94a3b8 !important; }
+
+    /* Sync status badge — dark variants */
+    .sync-badge.sync-ok   { background: #052e16 !important; color: #86efac !important; border-color: #14532d !important; }
+    .sync-badge.sync-warn { background: #451a03 !important; color: #fcd34d !important; border-color: #78350f !important; }
+    .sync-badge.sync-err  { background: #450a0a !important; color: #fca5a5 !important; border-color: #7f1d1d !important; }
 
     /* Card title buttons in dark mode */
     div[data-testid="stVerticalBlockBorderWrapper"] .stButton > button {
@@ -1626,14 +1734,36 @@ div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"
 
 # ── Header ────────────────────────────────────────────────────────────────────
 
-st.markdown("""
-<div class="app-header">
+# Sync status badge (reflects the last load/save against Supabase)
+_sb_status = st.session_state.get("sb_status", "local")
+_sb_msg    = (st.session_state.get("sb_message", "") or "").replace('"', "'")
+_ago       = fmt_ago(st.session_state.get("last_synced"))
+if _sb_status == "synced":
+    _badge_cls, _badge_icon, _badge_txt = "sync-ok",   "☁", f"Synced{(' · ' + _ago) if _ago else ''}"
+elif _sb_status == "error":
+    _badge_cls, _badge_icon, _badge_txt = "sync-err",  "⚠", "Cloud save failed — local only"
+else:  # local
+    _badge_cls, _badge_icon, _badge_txt = "sync-warn", "⚠", "Local only — not in cloud"
+
+st.markdown(
+    f"""
+<div class="app-header" style="justify-content:space-between;width:100%;">
     <div>
         <div class="app-title">Jobs Manager</div>
         <div class="app-subtitle">NZL 49er Programme</div>
     </div>
+    <div class="sync-badge {_badge_cls}" title="{_sb_msg}">
+        <span style="font-size:13px;">{_badge_icon}</span>&nbsp;{_badge_txt}
+    </div>
 </div>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
+# Surface a loud message when not fully synced
+if _sb_status == "error":
+    st.error(_sb_msg)
+elif _sb_status == "local" and st.session_state.get("sync_source") != "seed":
+    st.warning(_sb_msg)
 
 st.markdown("---")
 
