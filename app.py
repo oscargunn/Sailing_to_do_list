@@ -1257,12 +1257,8 @@ h4 { font-size: 10px !important; font-weight: 700 !important; color: #94a3b8 !im
 code { font-family: 'DM Mono', monospace !important; font-size: 11px !important; background: #f1f5f9 !important; color: #475569 !important; border-radius: 4px !important; padding: 1px 6px !important; }
 
 /* ── Card title buttons — look like bold text, not a button ───────── */
-div[data-testid="stVerticalBlockBorderWrapper"]
-    > div
-    > [data-testid="stVerticalBlock"]
-    > [data-testid="element-container"]
-    > .stButton
-    > button {
+/* Broad descendant selector so intermediate wrapper changes don't break it */
+div[data-testid="stVerticalBlockBorderWrapper"] .stButton > button {
     background: none !important;
     border: none !important;
     box-shadow: none !important;
@@ -1279,16 +1275,40 @@ div[data-testid="stVerticalBlockBorderWrapper"]
     line-height: 1.4 !important;
     white-space: normal !important;
     word-break: break-word !important;
+    transform: none !important;
 }
-div[data-testid="stVerticalBlockBorderWrapper"]
-    > div
-    > [data-testid="stVerticalBlock"]
-    > [data-testid="element-container"]
-    > .stButton
-    > button:hover {
+div[data-testid="stVerticalBlockBorderWrapper"] .stButton > button:hover {
     color: #2563eb !important;
     background: none !important;
     text-decoration: underline !important;
+    transform: none !important;
+}
+
+/* Restore normal button style for ACTION buttons in the bottom row
+   (delete 🗑 and any column-nested buttons — they're inside stHorizontalBlock) */
+div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"] .stButton > button {
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+    box-shadow: none !important;
+    height: 30px !important;
+    min-height: 30px !important;
+    padding: 2px 10px !important;
+    text-align: center !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    color: #64748b !important;
+    justify-content: center !important;
+    letter-spacing: 0.01em !important;
+    line-height: normal !important;
+    white-space: nowrap !important;
+    word-break: normal !important;
+    border-radius: 8px !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"] .stButton > button:hover {
+    background: #f1f5f9 !important;
+    color: #374151 !important;
+    text-decoration: none !important;
+    border-color: #cbd5e1 !important;
 }
 
 /* ── Metric tiles ────────────────────────────────────────────────── */
@@ -1400,18 +1420,24 @@ div[data-testid="stVerticalBlockBorderWrapper"]
     .badge-archived    { background: #1e293b !important; color: #94a3b8 !important; }
 
     /* Card title buttons in dark mode */
-    div[data-testid="stVerticalBlockBorderWrapper"]
-        > div
-        > [data-testid="stVerticalBlock"]
-        > [data-testid="element-container"]
-        > .stButton
-        > button { color: #ececec !important; }
-    div[data-testid="stVerticalBlockBorderWrapper"]
-        > div
-        > [data-testid="stVerticalBlock"]
-        > [data-testid="element-container"]
-        > .stButton
-        > button:hover { color: #93c5fd !important; }
+    div[data-testid="stVerticalBlockBorderWrapper"] .stButton > button {
+        color: #ececec !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] .stButton > button:hover {
+        color: #93c5fd !important;
+    }
+    /* Restore action buttons in dark mode */
+    div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"] .stButton > button {
+        background: #2d2d2d !important;
+        border: 1px solid #3d3d3d !important;
+        color: #9ca3af !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"] .stButton > button:hover {
+        background: #333333 !important;
+        color: #ececec !important;
+        border-color: #4d4d4d !important;
+        text-decoration: none !important;
+    }
 
     /* Tabs */
     .stTabs [data-baseweb="tab-list"] {
@@ -1542,15 +1568,20 @@ div[data-testid="stVerticalBlockBorderWrapper"]
     }
 
     /* Card title buttons stay text-like but easier to tap */
-    div[data-testid="stVerticalBlockBorderWrapper"]
-        > div
-        > [data-testid="stVerticalBlock"]
-        > [data-testid="element-container"]
-        > .stButton
-        > button {
+    div[data-testid="stVerticalBlockBorderWrapper"] .stButton > button {
         font-size: 14px !important;
         padding: 6px 0 8px !important;
         min-height: 36px !important;
+    }
+    /* Keep action buttons normal on mobile */
+    div[data-testid="stVerticalBlockBorderWrapper"] [data-testid="stHorizontalBlock"] .stButton > button {
+        font-size: 13px !important;
+        padding: 8px 12px !important;
+        min-height: 44px !important;
+        height: 44px !important;
+        white-space: nowrap !important;
+        word-break: normal !important;
+        text-align: center !important;
     }
 
     /* Dialogs: fill the screen width */
