@@ -500,6 +500,109 @@ def save_data():
                   f"Saved on this device, but the cloud save FAILED — this change is not backed up. ({e})",
                   ts if local_ok else st.session_state.get("last_synced"), "local")
 
+# ── Google Calendar sync ──────────────────────────────────────────────────────
+# When a job is assigned to ME and has a due date, mirror it as an all-day event
+# on my Google Calendar (reusing the same service account as the personal app).
+
+try:
+    from google.oauth2 import service_account as _gcal_sa
+    from googleapiclient.discovery import build as _gcal_build
+    _GCAL_PKGS = True
+except Exception as _ge:
+    _GCAL_PKGS = False
+    _GCAL_IMPORT_ERROR = f"{type(_ge).__name__}: {_ge}"
+
+# Who "me" is, and therefore whose assigned jobs get pushed to the calendar.
+MY_NAME     = "Oscar"
+MY_EMAIL    = "0oscargunn0@gmail.com"
+GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
+
+@st.cache_resource
+def _gcal_service():
+    if not _GCAL_PKGS:
+        return None
+    try:
+        info  = dict(st.secrets["gcp_service_account"])
+        creds = _gcal_sa.Credentials.from_service_account_info(info, scopes=GCAL_SCOPES)
+        return _gcal_build("calendar", "v3", credentials=creds)
+    except Exception:
+        return None
+
+def _gcal_calendar_id() -> str:
+    try:
+        return st.secrets["gcp_service_account"].get("calendar_id", "primary")
+    except Exception:
+        return "primary"
+
+def assigned_to_me(job: dict) -> bool:
+    """True if this job is assigned to me, by name or by email."""
+    if MY_NAME.lower() in [n.lower() for n in job_assignees(job)]:
+        return True
+    emails = {e.strip().lower() for e in (job.get("assignedEmail") or "").split(",") if e.strip()}
+    return MY_EMAIL.lower() in emails
+
+def _gcal_event_body(job: dict) -> dict:
+    parts = [
+        f"Priority: {job.get('priority', '')}",
+        f"Status: {job.get('status', '')}",
+        f"Location: {job.get('location', '')}",
+    ]
+    if job.get("assignedName"):
+        parts.append(f"Assigned: {job['assignedName']}")
+    if job.get("notes"):
+        parts.append(f"Notes: {job['notes']}")
+    if job.get("description"):
+        parts.append(job["description"])
+    return {
+        "summary":     f"⛵ {job['title']}",
+        "description": "\n".join(parts),
+        "start":       {"date": job["dueDate"]},
+        "end":         {"date": job["dueDate"]},
+    }
+
+def _should_have_event(job: dict) -> bool:
+    return bool(
+        assigned_to_me(job)
+        and job.get("dueDate")
+        and job.get("status") not in ("Completed", "Archived")
+    )
+
+def sync_job_calendar(job: dict):
+    """Reconcile this job's calendar event with its current state.
+    Mutates job['gcal_event_id']. Caller persists via save_data()."""
+    svc = _gcal_service()
+    if not svc:
+        return
+    cal_id   = _gcal_calendar_id()
+    event_id = job.get("gcal_event_id")
+    want     = _should_have_event(job)
+    try:
+        if want and not event_id:
+            res = svc.events().insert(calendarId=cal_id, body=_gcal_event_body(job)).execute()
+            job["gcal_event_id"] = res.get("id")
+        elif want and event_id:
+            svc.events().update(calendarId=cal_id, eventId=event_id, body=_gcal_event_body(job)).execute()
+        elif not want and event_id:
+            try:
+                svc.events().delete(calendarId=cal_id, eventId=event_id).execute()
+            except Exception:
+                pass
+            job["gcal_event_id"] = None
+    except Exception as e:
+        st.session_state["gcal_error"] = f"Calendar sync failed: {e}"
+
+def delete_job_calendar(job: dict):
+    """Remove this job's calendar event entirely (used when the job is deleted)."""
+    svc      = _gcal_service()
+    event_id = job.get("gcal_event_id")
+    if not svc or not event_id:
+        return
+    try:
+        svc.events().delete(calendarId=_gcal_calendar_id(), eventId=event_id).execute()
+    except Exception:
+        pass
+    job["gcal_event_id"] = None
+
 # ── Mutations ─────────────────────────────────────────────────────────────────
 
 def auto_archive():
@@ -508,6 +611,7 @@ def auto_archive():
     for j in st.session_state.jobs:
         if j["status"] == "Completed" and j.get("completedAt") and ts - j["completedAt"] >= 48 * 3_600_000:
             j["status"] = "Archived"
+            sync_job_calendar(j)   # archived → event removed
             dirty = True
     if dirty:
         save_data()
@@ -518,10 +622,15 @@ def set_status(job_id: str, status: str):
             j["status"] = status
             if status == "Completed":
                 j["completedAt"] = now_ms()
+            sync_job_calendar(j)   # completed → event removed; reopened → recreated
             break
     save_data()
 
 def remove_job(job_id: str):
+    for j in st.session_state.jobs:
+        if j["id"] == job_id:
+            delete_job_calendar(j)
+            break
     st.session_state.jobs = [j for j in st.session_state.jobs if j["id"] != job_id]
     save_data()
 
@@ -531,6 +640,7 @@ def restore_job(job_id: str):
             j["status"]            = "Pending"
             j["completedAt"]       = None
             j["reminder_sent_48h"] = False   # allow a fresh reminder
+            sync_job_calendar(j)   # back to active → event recreated if due+mine
             break
     save_data()
 
@@ -544,12 +654,13 @@ def upsert_job(data: dict, job_id: str | None = None):
                 break
     else:
         new_job = {
-            "comments": [], "subtasks": [], "reminder_sent_48h": False,
+            "comments": [], "subtasks": [], "reminder_sent_48h": False, "gcal_event_id": None,
             **data,
             "id": gen_id(), "createdAt": now_ms(), "completedAt": None,
         }
         st.session_state.jobs.append(new_job)
         saved = new_job
+    sync_job_calendar(saved)   # create / update / remove the calendar event to match
     save_data()
     # Auto-send email on new job creation if email provided
     if is_new and saved.get("assignedEmail"):
@@ -1279,6 +1390,8 @@ if "email_toast" in st.session_state:
     st.toast(st.session_state.pop("email_toast"))
 if "email_toast_error" in st.session_state:
     st.error(st.session_state.pop("email_toast_error"))
+if "gcal_error" in st.session_state:
+    st.warning(st.session_state.pop("gcal_error"))
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 
