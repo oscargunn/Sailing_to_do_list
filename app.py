@@ -802,7 +802,7 @@ def render_dashboard():
     in_prog   = sum(1 for j in active if j["status"] == "In Progress")
     completed = sum(1 for j in active if j["status"] == "Completed")
     n_overdue = sum(1 for j in active if _is_overdue(j))
-    n_urgent  = sum(1 for j in active if effective_priority(j) == "Urgent" and not _is_overdue(j))
+    n_urgent  = sum(1 for j in active if j["status"] != "Completed" and effective_priority(j) == "Urgent" and not _is_overdue(j))
 
     # ── Metric tiles — compact, clickable, no separate button ────────
     dash_filter = st.session_state.get("dash_filter")
@@ -849,7 +849,7 @@ def render_dashboard():
             filtered = [j for j in active if _is_overdue(j)]
             heading  = "Overdue Jobs"
         elif dash_filter == "urgent":
-            filtered = [j for j in active if effective_priority(j) == "Urgent" and not _is_overdue(j)]
+            filtered = [j for j in active if j["status"] != "Completed" and effective_priority(j) == "Urgent" and not _is_overdue(j)]
             heading  = "Urgent Jobs"
         else:
             filtered = [j for j in active if j["status"] == dash_filter]
@@ -879,7 +879,8 @@ def render_dashboard():
 
         needs = [
             j for j in active
-            if _is_overdue(j) or effective_priority(j) == "Urgent"
+            if j["status"] != "Completed"
+            and (_is_overdue(j) or effective_priority(j) == "Urgent")
         ]
 
         def _attn_sort(j):
@@ -948,7 +949,7 @@ def render_dashboard():
                 })
             ]
             ov   = sum(1 for j in c_jobs if _is_overdue(j))
-            ug   = sum(1 for j in c_jobs if effective_priority(j) == "Urgent" and not _is_overdue(j))
+            ug   = sum(1 for j in c_jobs if j["status"] != "Completed" and effective_priority(j) == "Urgent" and not _is_overdue(j))
             pend = sum(1 for j in c_jobs if j["status"] == "Pending")
             inp  = sum(1 for j in c_jobs if j["status"] == "In Progress")
 
@@ -982,7 +983,7 @@ def render_dashboard():
         unassigned_jobs = [j for j in active if not job_assignees(j)]
         if unassigned_jobs:
             ov_u   = sum(1 for j in unassigned_jobs if _is_overdue(j))
-            ug_u   = sum(1 for j in unassigned_jobs if effective_priority(j) == "Urgent" and not _is_overdue(j))
+            ug_u   = sum(1 for j in unassigned_jobs if j["status"] != "Completed" and effective_priority(j) == "Urgent" and not _is_overdue(j))
             pend_u = sum(1 for j in unassigned_jobs if j["status"] == "Pending")
             inp_u  = sum(1 for j in unassigned_jobs if j["status"] == "In Progress")
             with st.container(border=True):
